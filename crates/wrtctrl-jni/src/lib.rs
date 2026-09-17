@@ -74,9 +74,28 @@ fn parse_json(text: &str) -> Result<Value, UbusError> {
         .map_err(|e| UbusError::InvalidArgument(format!("bad json: {e}")))
 }
 
+/// 网络错误细分：从错误链关键词归类，供 UI 层给出可行动的指引
+/// （dns=解析失败[典型：域名仅 IPv6 而当前网络无 v6]、refused=端口/设备不可达、
+///  tls=TLS 握手层失败）
+fn network_code(chain: &str) -> &'static str {
+    let lower = chain.to_lowercase();
+    if lower.contains("dns error")
+        || lower.contains("failed to lookup address")
+        || lower.contains("no address associated")
+    {
+        "dns"
+    } else if lower.contains("refused") {
+        "refused"
+    } else if lower.contains("certificate") || lower.contains("tls") || lower.contains("alert") {
+        "tls"
+    } else {
+        "network"
+    }
+}
+
 fn error_json(e: &UbusError) -> Value {
     let (code, ubus) = match e {
-        UbusError::Network(_) => ("network", None),
+        UbusError::Network(chain) => (network_code(chain), None),
         UbusError::Timeout => ("timeout", None),
         UbusError::Ubus(code) => ("ubus", Some(*code)),
         UbusError::InvalidResponse(_) => ("invalid_response", None),
@@ -93,17 +112,17 @@ fn error_json(e: &UbusError) -> Value {
 /// 登录错误专用信封：保留 auth/certificate 语义（经 UbusError 转换会压平成
 /// 通用 ubus 码，UI 层"认证失败/网络失败"的分支就失效了）
 fn login_error_json(e: &LoginError) -> Value {
-    let code = match e {
-        LoginError::Auth(_) => "auth",
-        LoginError::Timeout => "timeout",
-        LoginError::Certificate(_) => "certificate",
-        LoginError::Network(_) => "network",
-        LoginError::InvalidResponse(_) => "invalid_response",
-        LoginError::NoDevice => "no_device",
+    let (code, ubus) = match e {
+        LoginError::Auth(c) => ("auth", Some(*c)),
+        LoginError::Timeout => ("timeout", None),
+        LoginError::Certificate(_) => ("certificate", None),
+        LoginError::Network(chain) => (network_code(chain), None),
+        LoginError::InvalidResponse(_) => ("invalid_response", None),
+        LoginError::NoDevice => ("no_device", None),
     };
     let mut v = json!({"code": code, "message": e.to_string()});
-    if let LoginError::Auth(c) = e {
-        v["ubus"] = json!(c);
+    if let Some(code) = ubus {
+        v["ubus"] = json!(code);
     }
     v
 }

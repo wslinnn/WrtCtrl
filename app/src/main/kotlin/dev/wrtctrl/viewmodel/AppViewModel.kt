@@ -265,7 +265,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: CoreException) {
                 val textRes = when (e.code) {
                     "auth" -> R.string.device_list_error_auth
-                    "certificate" -> R.string.device_list_error_certificate
+                    "certificate", "tls" -> R.string.device_list_error_certificate
+                    "dns" -> R.string.device_list_error_dns
+                    "refused" -> R.string.device_list_error_refused
                     "network", "timeout" -> R.string.device_list_error_network
                     else -> R.string.device_list_error_other
                 }

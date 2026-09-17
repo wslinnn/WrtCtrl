@@ -4,4 +4,7 @@
     <string name="app_name">WrtCtrl</string>
     <!-- M0 临时调试入口（首页 panic 演练按钮），随调试 UI 一起移除 -->
     <string name="debug_panic_drill">panic 演练</string>
+    <!-- 网络错误细分指引 -->
+    <string name="device_list_error_dns">域名解析失败：当前网络解析不到该域名。若域名仅有 IPv6 记录而当前 WiFi 无 IPv6，请改用移动网络，或使用内网 IP 直连</string>
+    <string name="device_list_error_refused">连接被拒绝：设备不可达或端口未开放，请检查设备状态与防火墙放行</string>
 </resources>
