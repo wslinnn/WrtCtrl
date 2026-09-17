@@ -29,18 +29,25 @@ pub fn ping_level(ms: u64) -> PingLevel {
 }
 
 impl RouterClient {
-    /// HTTP 探活当前设备根 URL；离线/超时 → None（不区分失败原因，供切换器徽章用）
+    /// HTTP 探活任意设备根 URL（设备列表页并行 ping 多台用）；离线/超时 → None。
+    /// 语义对齐旧 pingDevice：收到任意 HTTP 响应（含 302/404）即算可达，不检查状态码。
+    pub async fn ping_url(&self, base_url: &str) -> Option<u64> {
+        let url = format!("{}/", base_url.trim_end_matches('/'));
+        let start = Instant::now();
+        let fut = self.http.get(&url).send();
+        tokio::time::timeout(PING_TIMEOUT, fut).await.ok()?.ok()?;
+        Some(start.elapsed().as_millis() as u64)
+    }
+
+    /// 探活当前设备
     pub async fn ping_device(&self) -> Option<u64> {
         let base = self
             .session
             .read()
             .await
             .as_ref()
-            .map(|d| d.base_url.trim_end_matches('/').to_string())?;
-        let start = Instant::now();
-        let fut = self.http.get(&base).send();
-        tokio::time::timeout(PING_TIMEOUT, fut).await.ok()?.ok()?;
-        Some(start.elapsed().as_millis() as u64)
+            .map(|d| d.base_url.clone())?;
+        self.ping_url(&base).await
     }
 }
 

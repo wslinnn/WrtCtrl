@@ -5,10 +5,9 @@
 //!
 //! JSON 形状对齐旧 oa-uci-list candidates 契约（camelCase），Kotlin 侧零转换。
 
-use crate::error::UbusError;
 use crate::rpc::RouterClient;
 use crate::uci::UCI_CALL_TIMEOUT;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::json;
 use std::time::Duration;
 
@@ -132,7 +131,8 @@ impl RouterClient {
             .collect()
     }
 
-    /// firewall 中 .type=zone 的 name 候选（redirect/rule/nat/forwarding 的 src/dest 下拉）
+    /// firewall 中 .type=zone 的 name 候选（redirect/rule/nat/forwarding 的 src/dest 下拉）。
+    /// 匿名 zone 无 name 选项时回退 section 名（对齐旧 `s.name || s['.name']`）
     pub async fn get_zone_candidates(&self) -> Vec<Candidate> {
         let Ok(sections) = self.uci_get("firewall").await else {
             return Vec::new();
@@ -140,11 +140,13 @@ impl RouterClient {
         sections
             .values()
             .filter(|s| s.section_type == "zone")
-            .filter_map(|s| {
-                s.options
+            .map(|s| {
+                let name = s
+                    .options
                     .get("name")
                     .and_then(|v| v.as_str())
-                    .map(|n| candidate(n.to_string(), n.to_string()))
+                    .unwrap_or(&s.name);
+                candidate(name.to_string(), name.to_string())
             })
             .collect()
     }

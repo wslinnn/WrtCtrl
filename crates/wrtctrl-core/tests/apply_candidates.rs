@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{client_to, last_call_params, ok_response, ubus_err_response, ubus_call_sequence};
+use common::{client_to, last_call_params, ok_response, ubus_err_response};
 use serde_json::json;
 use wiremock::{Mock, MockServer};
 use wrtctrl_core::error::UbusError;
@@ -162,7 +162,8 @@ async fn interface_candidates_from_network_config() {
     assert_eq!(values, ["lan", "wan6"]);
 }
 
-/// 契约：zone 候选 = firewall config 中 .type=zone 的 name 值
+/// 契约：zone 候选 = firewall config 中 .type=zone 的 name 值；
+/// 匿名 zone（无 name 选项）回退 section 名（旧 `s.name || s['.name']`）
 #[tokio::test]
 async fn zone_candidates_from_firewall_config() {
     let server = MockServer::start().await;
@@ -171,6 +172,7 @@ async fn zone_candidates_from_firewall_config() {
             "values": {
                 "z1": {".type": "zone", ".anonymous": true, ".name": "z1", "name": "lan"},
                 "z2": {".type": "zone", ".anonymous": true, ".name": "z2", "name": "wan"},
+                "z3": {".type": "zone", ".anonymous": true, ".name": "z3"},
                 "r1": {".type": "rule", ".anonymous": true, ".name": "r1"}
             }
         })))
@@ -180,7 +182,7 @@ async fn zone_candidates_from_firewall_config() {
 
     let zones = client.get_zone_candidates().await;
     let values: Vec<&str> = zones.iter().map(|d| d.value.as_str()).collect();
-    assert_eq!(values, ["lan", "wan"]);
+    assert_eq!(values, ["lan", "wan", "z3"]);
 }
 
 // ── USB 打印机 ──

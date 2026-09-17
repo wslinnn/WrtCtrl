@@ -166,9 +166,11 @@ impl RouterClient {
     }
 
     /// radio 启停：device 与其下所有 wifi-iface 的 disabled 同步（OR 关系，见模块注释）
-    /// + commit{rollback}；enable 时 /sbin/wifi up 兜底立即 up（失败忽略）
+    /// + commit{rollback}；enable 时 /sbin/wifi up 兜底立即 up（失败忽略）。
+    /// uci.get 失败时中止而非半写（否则只写 radio、
+    /// 不知道 iface 列表——enable 场景恰好触发注释里"残留 disabled 导致没真正开启"的 bug）
     pub async fn set_radio_enabled(&self, radio_name: &str, enabled: bool) -> Result<(), UbusError> {
-        let sections = self.uci_get("wireless").await.unwrap_or_default();
+        let sections = self.uci_get("wireless").await?;
         let val = if enabled { "0" } else { "1" };
         let mut iface_names: Vec<String> = sections
             .values()

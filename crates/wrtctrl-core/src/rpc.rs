@@ -58,7 +58,8 @@ impl RouterClient {
     }
 
     /// 通用 ubus call（任意 object/method），成功返回 result[1] 载荷。
-    /// `timeout` 为硬超时：请求任何阶段超时即失败，防页面级永久挂起。
+    /// `timeout` 为硬超时：覆盖 发送+响应头+响应体 全程——"连接已建立但服务端
+    /// 不响应/半途挂起"（如 rpcd file.exec 执行 hang 的命令）都必须最终失败。
     pub async fn call_ubus(
         &self,
         object: &str,
@@ -76,25 +77,52 @@ impl RouterClient {
                 .unwrap_or_else(|| EMPTY_SESSION.to_string());
             (url, session)
         };
+        self.post_ubus(&url, &session, object, method, params, timeout)
+            .await
+    }
+
+    /// 底层 POST：显式指定会话值（login 强制用 EMPTY_SESSION 走此路径，
+    /// 对应旧 loginDevice 的 `sysauth: null`——绝不能带旧会话去登录）。
+    /// 硬超时覆盖 send + body 读取全程。
+    pub(crate) async fn post_ubus(
+        &self,
+        url: &str,
+        session: &str,
+        object: &str,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, UbusError> {
         let body = json!({
             "jsonrpc": "2.0",
             "id": 1,
             "method": "call",
             "params": [session, object, method, params],
         });
-        let response = tokio::time::timeout(timeout, self.http.post(&url).json(&body).send())
+        let fut = async {
+            let response = self
+                .http
+                .post(url)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| UbusError::Network(e.to_string()))?;
+            let status = response.status();
+            let payload: Value = response
+                .json()
+                .await
+                .map_err(|e| UbusError::InvalidResponse(format!("http {status}: {e}")))?;
+            Ok::<_, UbusError>((status, payload))
+        };
+        let (status, payload) = tokio::time::timeout(timeout, fut)
             .await
-            .map_err(|_| UbusError::Timeout)?
-            .map_err(|e| UbusError::Network(e.to_string()))?;
-        let status = response.status();
-        let payload: Value = response
-            .json()
-            .await
-            .map_err(|e| UbusError::InvalidResponse(format!("http {status}: {e}")))?;
+            .map_err(|_| UbusError::Timeout)??;
         let result = payload
             .get("result")
             .and_then(|r| r.as_array())
-            .ok_or_else(|| UbusError::InvalidResponse(format!("missing result array: http {status}")))?;
+            .ok_or_else(|| {
+                UbusError::InvalidResponse(format!("missing result array: http {status}"))
+            })?;
         let code = result
             .first()
             .and_then(|v| v.as_i64())

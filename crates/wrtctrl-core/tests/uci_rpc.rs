@@ -117,6 +117,17 @@ async fn set_strips_empty_lists() {
     );
 }
 
+/// 契约：非对象 values 本地拒绝（零网络请求）
+#[tokio::test]
+async fn set_rejects_non_object_values() {
+    let server = MockServer::start().await;
+    let client = client_to(&server, "s").await;
+
+    let err = client.uci_set("system", "@system[0]", json!("scalar")).await.unwrap_err();
+    assert!(matches!(err, UbusError::InvalidArgument(_)), "got {err:?}");
+    assert!(server.received_requests().await.unwrap_or_default().is_empty());
+}
+
 // ── uci.order ──
 
 /// 契约：rpcd 方法名是 order（ACL 不授予 reorder），按目标顺序全量列出 sections

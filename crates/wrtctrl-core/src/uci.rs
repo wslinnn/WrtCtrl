@@ -93,16 +93,19 @@ impl RouterClient {
             })
     }
 
-    /// uci.set：空数组 value 就地剔除（rpcd 拒绝空 list）。
+    /// uci.set：空数组 value 就地剔除（rpcd 拒绝空 list）；非对象 values 本地拒绝
     pub async fn uci_set(&self, config: &str, section: &str, values: Value) -> Result<(), UbusError> {
+        let Some(obj) = values.as_object() else {
+            return Err(UbusError::InvalidArgument(
+                "uci_set values must be a JSON object".into(),
+            ));
+        };
         let mut cleaned = Map::new();
-        if let Some(obj) = values.as_object() {
-            for (key, value) in obj {
-                if value.as_array().is_some_and(|a| a.is_empty()) {
-                    continue;
-                }
-                cleaned.insert(key.clone(), value.clone());
+        for (key, value) in obj {
+            if value.as_array().is_some_and(|a| a.is_empty()) {
+                continue;
             }
+            cleaned.insert(key.clone(), value.clone());
         }
         self.call_ubus(
             "uci",

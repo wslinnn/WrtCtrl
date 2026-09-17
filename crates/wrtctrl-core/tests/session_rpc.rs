@@ -89,6 +89,24 @@ async fn bad_credentials_map_to_auth() {
     assert!(matches!(err, LoginError::Auth(6)), "got {err:?}");
 }
 
+/// 契约：登录永远以全 0 临时会话发起，即使上下文残留旧会话
+/// （mock 只匹配 EMPTY_SESSION 登录——若实现带旧会话登录，将 404 失败）
+#[tokio::test]
+async fn login_always_uses_empty_session() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(body_partial_json(json!({
+            "params": [EMPTY_SESSION, "session", "login", {"username": "root", "password": "pw"}]
+        })))
+        .respond_with(login_response("fresh"))
+        .mount(&server)
+        .await;
+    let client = client_to(&server, "stale-residue").await;
+
+    let session = client.login().await.unwrap();
+    assert_eq!(session, "fresh");
+}
+
 /// 契约：登录超时 → Timeout
 #[tokio::test]
 async fn login_timeout_maps() {

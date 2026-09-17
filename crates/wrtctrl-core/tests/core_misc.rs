@@ -236,6 +236,22 @@ async fn set_radio_enabled_syncs_device_and_ifaces() {
     assert_eq!(exec[3], json!({"command": "/sbin/wifi", "params": ["up", "radio1"]}));
 }
 
+/// 契约：uci.get 失败时中止启停（零写请求）——避免半写
+/// （只写 radio 会漏 iface、不知道 iface 列表，enable 场景恰触发"残留 disabled"根因）
+#[tokio::test]
+async fn set_radio_enabled_aborts_when_read_fails() {
+    let server = MockServer::start().await;
+    Mock::given(UbusCall("uci", "get"))
+        .respond_with(ubus_err_response(6))
+        .mount(&server)
+        .await;
+    let client = client_to(&server, "s").await;
+
+    let err = client.set_radio_enabled("radio1", true).await.unwrap_err();
+    assert!(matches!(err, UbusError::Ubus(6)));
+    assert!(server.received_requests().await.unwrap_or_default().len() == 1, "只应有 uci.get 一次请求");
+}
+
 /// 契约：assoclist 透传 results；空 ifname 不发请求
 #[tokio::test]
 async fn assoclist_passthrough_and_guard() {
@@ -291,6 +307,20 @@ async fn ping_device_probes_base_url() {
     assert!(ms.is_some(), "在线设备必须返回 Some");
     let _ = ping_level(ms.unwrap());
     assert_eq!(ping_level(299), PingLevel::Ok);
+}
+
+/// 契约：ping_url 可探活任意设备（设备列表页并行 ping 多台的前提）
+#[tokio::test]
+async fn ping_url_probes_arbitrary_device() {
+    let server = MockServer::start().await;
+    Mock::given(wiremock::matchers::method("GET"))
+        .respond_with(ok_response(json!({})))
+        .mount(&server)
+        .await;
+    // 全新客户端、无当前设备上下文，仅指定目标 URL
+    let client = RouterClient::new(true);
+    let ms = client.ping_url(&server.uri()).await;
+    assert!(ms.is_some());
 }
 
 /// 契约：离线（连不通）→ None

@@ -9,7 +9,7 @@
 //! - 凭证错误在 rpcd 表现为 result[0]=6（Permission denied）
 
 use crate::error::UbusError;
-use crate::rpc::RouterClient;
+use crate::rpc::{RouterClient, EMPTY_SESSION};
 use std::time::Duration;
 
 /// system.board 探针超时
@@ -62,17 +62,23 @@ impl From<UbusError> for LoginError {
 }
 
 impl RouterClient {
-    /// 两段式登录：用当前上下文的凭证调 session.login（以 EMPTY_SESSION），
-    /// 成功取 ubus_rpc_session 并就地更新会话。
+    /// 两段式登录：用当前上下文的凭证调 session.login，成功取 ubus_rpc_session
+    /// 并就地更新会话。
+    /// 登录强制以全 0 临时会话发起（旧 loginDevice 的 `sysauth: null`）——
+    /// 带残留旧会话去登录是未定义行为。
     pub async fn login(&self) -> Result<String, LoginError> {
-        let credentials = {
+        let (url, credentials) = {
             let guard = self.session.read().await;
             let device = guard.as_ref().ok_or(LoginError::NoDevice)?;
-            (device.username.clone(), device.password.clone())
+            let url = format!("{}/ubus", device.base_url.trim_end_matches('/'));
+            let credentials = (device.username.clone(), device.password.clone());
+            (url, credentials)
         };
         let (username, password) = credentials;
         let payload = self
-            .call_ubus(
+            .post_ubus(
+                &url,
+                EMPTY_SESSION,
                 "session",
                 "login",
                 serde_json::json!({"username": username, "password": password}),
@@ -100,6 +106,9 @@ impl RouterClient {
 
     /// commit 前置预检：探针失败 → 用存储凭证静默重登。
     /// 防"apply 成功但 confirm 因 session 过期失败 → 被 120s 回滚"。
+    /// 有意偏离说明：重登失败仍继续 apply 的路径已移除
+    /// （apply 随后以 ubus 6 失败）；新实现提前以明确错误中止。两者都不会产生
+    /// "apply 成功但 confirm 失败"的回滚窗口，新路径错误更清晰、不做无谓 apply。
     pub async fn ensure_session(&self) -> Result<(), LoginError> {
         if self.probe().await.is_ok() {
             return Ok(());
