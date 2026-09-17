@@ -43,6 +43,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.wrtctrl.R
 import dev.wrtctrl.bridge.WrtCore
 import dev.wrtctrl.ui.screen.DeviceGateScreen
+import dev.wrtctrl.ui.screen.LanguageAction
 import dev.wrtctrl.ui.screen.LanguageScreen
 import dev.wrtctrl.viewmodel.AppViewModel
 import dev.wrtctrl.viewmodel.Phase
@@ -71,13 +72,13 @@ fun AppRoot() {
             CircularProgressIndicator()
         }
         phase == Phase.Gate -> DeviceGateScreen(vm, onOpenLanguage = { showLanguage = true })
-        phase == Phase.Main -> MainTabs(vm)
+        phase == Phase.Main -> MainTabs(vm, onOpenLanguage = { showLanguage = true })
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MainTabs(vm: AppViewModel) {
+private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
     var selected by remember { mutableIntStateOf(0) }
     Scaffold(
         topBar = {
@@ -88,6 +89,7 @@ private fun MainTabs(vm: AppViewModel) {
                     IconButton(onClick = { vm.openDeviceList() }) {
                         Icon(Icons.Filled.Devices, contentDescription = stringResource(R.string.device_list_history_title))
                     }
+                    LanguageAction(onOpenLanguage)
                 },
             )
         },

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -71,8 +72,19 @@ import dev.wrtctrl.viewmodel.GateUiState
 fun DeviceGateScreen(vm: AppViewModel, onOpenLanguage: () -> Unit = {}) {
     val state by vm.gate.collectAsState()
     when (state.mode) {
-        GateMode.List -> ListMode(vm, state)
+        GateMode.List -> ListMode(vm, state, onOpenLanguage)
         GateMode.Form -> FormMode(vm, state, onOpenLanguage)
+    }
+}
+
+/// 语言切换入口：固定在顶栏右上角（用户反馈：不应藏在表单底部）
+@Composable
+internal fun LanguageAction(onOpenLanguage: () -> Unit) {
+    IconButton(onClick = onOpenLanguage) {
+        Icon(
+            Icons.Filled.Language,
+            contentDescription = stringResource(R.string.device_list_language_settings),
+        )
     }
 }
 
@@ -80,10 +92,15 @@ fun DeviceGateScreen(vm: AppViewModel, onOpenLanguage: () -> Unit = {}) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ListMode(vm: AppViewModel, state: GateUiState) {
+private fun ListMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () -> Unit) {
     var deleting by remember { mutableStateOf<Device?>(null) }
     Scaffold(
-        topBar = { TopAppBar(title = { Text(stringResource(R.string.device_list_history_title)) }) },
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.device_list_history_title)) },
+                actions = { LanguageAction(onOpenLanguage) },
+            )
+        },
         floatingActionButton = {
             if (state.devices.isNotEmpty()) {
                 ExtendedAddButton(onClick = { vm.openForm(null) })
@@ -289,6 +306,7 @@ private fun FormMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () ->
                         }
                     }
                 },
+                actions = { LanguageAction(onOpenLanguage) },
             )
         },
     ) { padding ->
@@ -403,17 +421,6 @@ private fun FormMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () ->
                 } else {
                     Text(stringResource(R.string.device_list_connect))
                 }
-            }
-            // 语言入口（首跑切语言场景）
-            TextButton(
-                onClick = onOpenLanguage,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(
-                    stringResource(R.string.device_list_language_settings),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
             Spacer(Modifier.height(24.dp))
         }
