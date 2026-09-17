@@ -28,3 +28,18 @@ pub enum UbusError {
     #[error("no device configured")]
     NoDevice,
 }
+
+/// 会话层错误 → ubus 错误的反向映射（如 commit 预检中重登失败：
+/// Auth 还原为原始 ubus 码透传给 UI，与"预检前就是 6"的表现一致）
+impl From<crate::session::LoginError> for UbusError {
+    fn from(e: crate::session::LoginError) -> Self {
+        use crate::session::LoginError as L;
+        match e {
+            L::Auth(code) => UbusError::Ubus(code),
+            L::Timeout => UbusError::Timeout,
+            L::NoDevice => UbusError::NoDevice,
+            L::Certificate(m) | L::Network(m) => UbusError::Network(m),
+            L::InvalidResponse(m) => UbusError::InvalidResponse(m),
+        }
+    }
+}

@@ -6,6 +6,7 @@
 pub mod error;
 pub mod rpc;
 pub mod session;
+pub mod uci;
 
 pub use error::UbusError;
 pub use rpc::{DeviceSession, RouterClient, EMPTY_SESSION};
