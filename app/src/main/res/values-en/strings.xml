@@ -6,4 +6,5 @@
     <string name="device_list_error_refused">Connection refused: the device is unreachable or the port is closed. Check the device status and firewall rules</string>
     <string name="debug_last_crash">Last crash</string>
     <string name="language_follow_system">Follow system</string>
+    <string name="home_chart_collecting">Collecting data…</string>
 </resources>

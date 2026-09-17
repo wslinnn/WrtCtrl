@@ -219,11 +219,13 @@ private fun Ring(percent: Int, modifier: Modifier = Modifier) {
     }
 }
 
-/** 实时带宽双折线（Vico 2.1）：rx/tx 两条线，无坐标轴的迷你形态 */
+/** 实时带宽双折线（Vico 2.1）：rx/tx 两条线，无坐标轴的迷你形态。
+ *  空序列守卫：Vico 对空 series 直接 require 崩溃（闪退根因），首份差分产出前显示占位 */
 @Composable
 private fun BandwidthChart(rx: List<Double>, tx: List<Double>, modifier: Modifier = Modifier) {
     val modelProducer = remember { CartesianChartModelProducer() }
     LaunchedEffect(rx, tx) {
+        if (rx.isEmpty() || tx.isEmpty()) return@LaunchedEffect
         modelProducer.runTransaction {
             lineSeries {
                 series(rx)
@@ -231,13 +233,24 @@ private fun BandwidthChart(rx: List<Double>, tx: List<Double>, modifier: Modifie
             }
         }
     }
-    val lineProvider = LineCartesianLayer.LineProvider.series(
-        LineCartesianLayer.Line(LineCartesianLayer.LineFill.single(Fill(Color(RX_COLOR).toArgb()))),
-        LineCartesianLayer.Line(LineCartesianLayer.LineFill.single(Fill(Color(TX_COLOR).toArgb()))),
-    )
-    CartesianChartHost(
-        chart = rememberCartesianChart(rememberLineCartesianLayer(lineProvider)),
-        modelProducer = modelProducer,
-        modifier = modifier,
-    )
+    Box(modifier) {
+        if (rx.isEmpty()) {
+            Text(
+                stringResource(R.string.home_chart_collecting),
+                Modifier.align(Alignment.Center),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            val lineProvider = LineCartesianLayer.LineProvider.series(
+                LineCartesianLayer.Line(LineCartesianLayer.LineFill.single(Fill(Color(RX_COLOR).toArgb()))),
+                LineCartesianLayer.Line(LineCartesianLayer.LineFill.single(Fill(Color(TX_COLOR).toArgb()))),
+            )
+            CartesianChartHost(
+                chart = rememberCartesianChart(rememberLineCartesianLayer(lineProvider)),
+                modelProducer = modelProducer,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
 }
