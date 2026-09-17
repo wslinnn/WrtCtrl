@@ -29,6 +29,12 @@ pub enum UbusError {
     NoDevice,
 }
 
+impl From<serde_json::Error> for UbusError {
+    fn from(e: serde_json::Error) -> Self {
+        UbusError::InvalidResponse(format!("json: {e}"))
+    }
+}
+
 /// 会话层错误 → ubus 错误的反向映射（如 commit 预检中重登失败：
 /// Auth 还原为原始 ubus 码透传给 UI，与"预检前就是 6"的表现一致）
 impl From<crate::session::LoginError> for UbusError {

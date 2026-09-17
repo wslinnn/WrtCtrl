@@ -1592,6 +1592,9 @@ name = "wrtctrl-jni"
 version = "0.1.0"
 dependencies = [
  "jni",
+ "serde",
+ "serde_json",
+ "tokio",
  "wrtctrl-core",
 ]
 
