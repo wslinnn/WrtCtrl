@@ -38,7 +38,6 @@ data class GateUiState(
     /** 字段名 → 文案资源 id */
     val fieldErrors: Map<String, Int> = emptyMap(),
     val formErrorText: String? = null,
-    val formErrorDetail: String? = null,
     val formErrorCode: String? = null,
     val connecting: Boolean = false,
     val editingId: String? = null,
@@ -152,7 +151,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 bannerError = null,
                 fieldErrors = emptyMap(),
                 formErrorText = null,
-                formErrorDetail = null,
                 formErrorCode = null,
                 form = if (device != null) {
                     FormState(
@@ -236,7 +234,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         val checkedPort = port ?: 80
         _gate.update {
-            it.copy(fieldErrors = emptyMap(), connecting = true, formErrorText = null, formErrorDetail = null, formErrorCode = null)
+            it.copy(fieldErrors = emptyMap(), connecting = true, formErrorText = null, formErrorCode = null)
         }
         viewModelScope.launch {
             try {
@@ -263,6 +261,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 _current.value = device
                 _phase.value = Phase.Main
             } catch (e: CoreException) {
+                // 原始错误链只进 logcat（tag=wrtctrl），不上 UI——UI 只显示分类后的指引文案
+                android.util.Log.w("wrtctrl", "connect failed: code=${e.code} ubus=${e.ubus} msg=${e.message}")
                 val textRes = when (e.code) {
                     "auth" -> R.string.device_list_error_auth
                     "certificate", "tls" -> R.string.device_list_error_certificate
@@ -275,17 +275,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         connecting = false,
                         formErrorText = str(textRes),
-                        // 认证错误的"ubus error 6"属调试噪音，不展示；其余保留原始信息便于反馈
-                        formErrorDetail = if (e.code == "auth") null else e.message,
                         formErrorCode = e.code,
                     )
                 }
             } catch (e: Exception) {
+                android.util.Log.w("wrtctrl", "connect failed: ${e.message}")
                 _gate.update {
                     it.copy(
                         connecting = false,
                         formErrorText = str(R.string.device_list_error_other),
-                        formErrorDetail = e.message,
                         formErrorCode = "other",
                     )
                 }
