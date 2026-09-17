@@ -4,4 +4,5 @@
     <string name="debug_panic_drill">panic drill</string>
     <string name="device_list_error_dns">DNS lookup failed: the hostname has no address on this network. If the domain is IPv6-only and your WiFi has no IPv6, use mobile data or connect via the LAN IP</string>
     <string name="device_list_error_refused">Connection refused: the device is unreachable or the port is closed. Check the device status and firewall rules</string>
+    <string name="language_follow_system">Follow system</string>
 </resources>

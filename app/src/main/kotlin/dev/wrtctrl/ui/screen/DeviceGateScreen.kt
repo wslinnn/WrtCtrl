@@ -68,11 +68,11 @@ import dev.wrtctrl.viewmodel.GateUiState
 
 /** 设备门控页（双形态）：列表（直连/编辑/删除）+ 添加·编辑表单。*/
 @Composable
-fun DeviceGateScreen(vm: AppViewModel) {
+fun DeviceGateScreen(vm: AppViewModel, onOpenLanguage: () -> Unit = {}) {
     val state by vm.gate.collectAsState()
     when (state.mode) {
         GateMode.List -> ListMode(vm, state)
-        GateMode.Form -> FormMode(vm, state)
+        GateMode.Form -> FormMode(vm, state, onOpenLanguage)
     }
 }
 
@@ -260,7 +260,7 @@ private fun ExtendedAddButton(onClick: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun FormMode(vm: AppViewModel, state: GateUiState) {
+private fun FormMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () -> Unit) {
     val editing = state.editingId != null
     val hasDevices = state.devices.isNotEmpty()
     var showPassword by remember { mutableStateOf(false) }
@@ -403,6 +403,17 @@ private fun FormMode(vm: AppViewModel, state: GateUiState) {
                 } else {
                     Text(stringResource(R.string.device_list_connect))
                 }
+            }
+            // 语言入口（首跑切语言场景）
+            TextButton(
+                onClick = onOpenLanguage,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    stringResource(R.string.device_list_language_settings),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             Spacer(Modifier.height(24.dp))
         }

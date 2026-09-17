@@ -43,6 +43,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.wrtctrl.R
 import dev.wrtctrl.bridge.WrtCore
 import dev.wrtctrl.ui.screen.DeviceGateScreen
+import dev.wrtctrl.ui.screen.LanguageScreen
 import dev.wrtctrl.viewmodel.AppViewModel
 import dev.wrtctrl.viewmodel.Phase
 
@@ -62,13 +63,15 @@ fun AppRoot() {
     val app = LocalContext.current.applicationContext as Application
     val vm: AppViewModel = viewModel(factory = viewModelFactory { initializer { AppViewModel(app) } })
     val phase by vm.phase.collectAsStateWithLifecycle()
+    var showLanguage by remember { mutableStateOf(false) }
 
-    when (phase) {
-        Phase.Boot -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    when {
+        showLanguage -> LanguageScreen(onBack = { showLanguage = false })
+        phase == Phase.Boot -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
-        Phase.Gate -> DeviceGateScreen(vm)
-        Phase.Main -> MainTabs(vm)
+        phase == Phase.Gate -> DeviceGateScreen(vm, onOpenLanguage = { showLanguage = true })
+        phase == Phase.Main -> MainTabs(vm)
     }
 }
 
