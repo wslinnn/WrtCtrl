@@ -114,7 +114,8 @@ private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
                     val homeVm: HomeViewModel = viewModel(
                         factory = viewModelFactory { initializer { HomeViewModel(app) } }
                     )
-                    HomeScreen(homeVm, Modifier.padding(padding).fillMaxSize())
+                    // 注意：Scaffold padding 已由外层 Box 消费，此处不可再叠加（双重空白的根因）
+                    HomeScreen(homeVm, Modifier.fillMaxSize())
                 }
                 else -> PlaceholderText(stringResource(TABS[selected].labelRes), Modifier.fillMaxSize())
             }

@@ -1,15 +1,17 @@
 package dev.wrtctrl.ui.screen
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -19,20 +21,30 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
+import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
+import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
+import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
+import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
+import com.patrykandpatrick.vico.core.cartesian.layer.LineCartesianLayer
+import com.patrykandpatrick.vico.core.common.Fill
 import dev.wrtctrl.R
 import dev.wrtctrl.util.Format
+import dev.wrtctrl.util.formatBytes
 import dev.wrtctrl.viewmodel.HomeViewModel
 
 private const val RX_COLOR = 0xFF4FACFE
@@ -44,7 +56,10 @@ fun HomeScreen(vm: HomeViewModel, modifier: Modifier = Modifier) {
     val state by vm.state.collectAsStateWithLifecycle()
     if (state.loading) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 CircularProgressIndicator()
                 Text(
                     stringResource(R.string.home_loading),
@@ -62,7 +77,7 @@ fun HomeScreen(vm: HomeViewModel, modifier: Modifier = Modifier) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        DashboardCard(title = stringResource(R.string.home_system_status)) {
+        DashboardCard(stringResource(R.string.home_system_status)) {
             InfoRow(stringResource(R.string.home_model), state.model)
             InfoRow(stringResource(R.string.home_system_name), state.hostname)
             InfoRow(stringResource(R.string.home_version_info), state.version)
@@ -71,34 +86,31 @@ fun HomeScreen(vm: HomeViewModel, modifier: Modifier = Modifier) {
             InfoRow(stringResource(R.string.home_temperature), state.temperature)
         }
 
-        DashboardCard(title = stringResource(R.string.home_memory_usage)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Ring(percent = state.memoryPercent, modifier = Modifier.size(96.dp))
-                Spacer(Modifier.size(16.dp))
-                Column {
-                    Text("${state.memoryPercent}%", style = MaterialTheme.typography.headlineSmall)
-                    Text(
-                        state.memoryDetail,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+        DashboardCard(stringResource(R.string.home_memory_usage)) {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Ring(percent = state.memoryPercent, modifier = Modifier.size(120.dp))
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    state.memoryDetail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 
-        DashboardCard(title = stringResource(R.string.home_resource_monitor)) {
+        DashboardCard(stringResource(R.string.home_resource_monitor)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 RateBlock(label = "↓ RX", rate = state.rxRate, color = Color(RX_COLOR))
                 RateBlock(label = "↑ TX", rate = state.txRate, color = Color(TX_COLOR))
             }
-            Sparkline(
+            BandwidthChart(
                 rx = state.rxSeries,
                 tx = state.txSeries,
                 modifier = Modifier.fillMaxWidth().height(120.dp).padding(top = 8.dp),
             )
         }
 
-        DashboardCard(title = stringResource(R.string.home_network_status)) {
+        DashboardCard(stringResource(R.string.home_network_status)) {
             InfoRow(stringResource(R.string.home_wan_ip), state.wanIp)
             InfoRow(stringResource(R.string.home_lan_ip), state.lanIp)
             InfoRow(stringResource(R.string.home_gateway), state.gateway)
@@ -106,7 +118,7 @@ fun HomeScreen(vm: HomeViewModel, modifier: Modifier = Modifier) {
             InfoRow(stringResource(R.string.home_connections), state.connections)
         }
 
-        DashboardCard(title = stringResource(R.string.home_disk_status)) {
+        DashboardCard(stringResource(R.string.home_disk_status)) {
             if (state.mounts.isEmpty()) {
                 Text(
                     "--",
@@ -169,11 +181,16 @@ private fun RateBlock(label: String, rate: Long, color: Color) {
     }
 }
 
-/** 内存环形图（M3 主色弧线，参数化单份） */
+/** 内存环形图：渐变弧 + 圆头端帽 + 进度动画；环内百分比，环下明细由调用方排布 */
 @Composable
 private fun Ring(percent: Int, modifier: Modifier = Modifier) {
+    val animated by animateFloatAsState(
+        targetValue = percent / 100f,
+        animationSpec = tween(600),
+        label = "memoryRing",
+    )
     val track = MaterialTheme.colorScheme.surfaceVariant
-    val progress = MaterialTheme.colorScheme.primary
+    val brush = Brush.linearGradient(listOf(Color(RX_COLOR), Color(TX_COLOR)))
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val stroke = 12.dp.toPx()
@@ -185,42 +202,40 @@ private fun Ring(percent: Int, modifier: Modifier = Modifier) {
                 style = Stroke(stroke, cap = StrokeCap.Round),
             )
             drawArc(
-                color = progress,
+                brush = brush,
                 startAngle = -90f,
-                sweepAngle = 360f * percent.coerceIn(0, 100) / 100f,
+                sweepAngle = 360f * animated.coerceIn(0f, 1f),
                 useCenter = false,
                 style = Stroke(stroke, cap = StrokeCap.Round),
             )
         }
-        Text("${percent}%", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(
+            "${(animated * 100).toInt()}%",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 
-/** 实时带宽双折线（rx/tx），数据点由 3s 轮询差分产出 */
+/** 实时带宽双折线（Vico 2.1）：rx/tx 两条线，无坐标轴的迷你形态 */
 @Composable
-private fun Sparkline(rx: List<Double>, tx: List<Double>, modifier: Modifier = Modifier) {
-    val rxColor = Color(RX_COLOR)
-    val txColor = Color(TX_COLOR)
-    val grid = MaterialTheme.colorScheme.surfaceVariant
-    val max = ((rx.maxOrNull() ?: 0.0).coerceAtLeast((tx.maxOrNull() ?: 0.0)) * 1.1).coerceAtLeast(1.0)
-    Canvas(modifier) {
-        // 横向网格线 5 等分
-        for (i in 1..4) {
-            val y = size.height * i / 5
-            drawLine(color = grid, start = Offset(0f, y), end = Offset(size.width, y), strokeWidth = 1f)
-        }
-        fun seriesPath(series: List<Double>): androidx.compose.ui.graphics.Path? {
-            if (series.size < 2) return null
-            val stepX = size.width / (series.size - 1)
-            val path = androidx.compose.ui.graphics.Path()
-            series.forEachIndexed { index, value ->
-                val x = index * stepX
-                val y = size.height * (1f - (value / max).toFloat().coerceIn(0f, 1f))
-                if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+private fun BandwidthChart(rx: List<Double>, tx: List<Double>, modifier: Modifier = Modifier) {
+    val modelProducer = remember { CartesianChartModelProducer() }
+    LaunchedEffect(rx, tx) {
+        modelProducer.runTransaction {
+            lineSeries {
+                series(rx)
+                series(tx)
             }
-            return path
         }
-        seriesPath(rx)?.let { drawPath(it, rxColor, style = Stroke(4f, cap = StrokeCap.Round)) }
-        seriesPath(tx)?.let { drawPath(it, txColor, style = Stroke(4f, cap = StrokeCap.Round)) }
     }
+    val lineProvider = LineCartesianLayer.LineProvider.series(
+        LineCartesianLayer.Line(LineCartesianLayer.LineFill.single(Fill(Color(RX_COLOR).toArgb()))),
+        LineCartesianLayer.Line(LineCartesianLayer.LineFill.single(Fill(Color(TX_COLOR).toArgb()))),
+    )
+    CartesianChartHost(
+        chart = rememberCartesianChart(rememberLineCartesianLayer(lineProvider)),
+        modelProducer = modelProducer,
+        modifier = modifier,
+    )
 }
