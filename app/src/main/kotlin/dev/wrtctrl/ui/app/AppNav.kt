@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -82,12 +83,23 @@ fun AppRoot() {
         if (file.exists()) crashText = runCatching { file.readText() }.getOrNull()
     }
 
-    Column(Modifier.fillMaxSize()) {
+    // 崩溃卡用浮层呈现：状态栏避让 + 悬浮于内容上方（不挤压布局、不产生空隙）
+    Box(Modifier.fillMaxSize()) {
+        when {
+            showLanguage -> LanguageScreen(onBack = { showLanguage = false })
+            phase == Phase.Boot -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+            phase == Phase.Gate -> DeviceGateScreen(vm, onOpenLanguage = { showLanguage = true })
+            phase == Phase.Main -> MainTabs(vm, onOpenLanguage = { showLanguage = true })
+        }
         crashText?.let { crash ->
             Card(
                 Modifier
                     .fillMaxWidth()
-                    .padding(8.dp),
+                    .statusBarsPadding()
+                    .padding(8.dp)
+                    .align(Alignment.TopCenter),
                 colors = androidx.compose.material3.CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.errorContainer,
                 ),
@@ -116,16 +128,6 @@ fun AppRoot() {
                         color = MaterialTheme.colorScheme.onErrorContainer,
                     )
                 }
-            }
-        }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            when {
-                showLanguage -> LanguageScreen(onBack = { showLanguage = false })
-                phase == Phase.Boot -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-                phase == Phase.Gate -> DeviceGateScreen(vm, onOpenLanguage = { showLanguage = true })
-                phase == Phase.Main -> MainTabs(vm, onOpenLanguage = { showLanguage = true })
             }
         }
     }
