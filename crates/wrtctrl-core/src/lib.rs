@@ -3,6 +3,8 @@
 //! 分层约束：所有路由器 IO 唯一入口在本 crate；
 //! 安全写路径（rollback/confirm、session 预检、apply 白名单）只存在于这里。
 
+pub mod apply;
+pub mod candidates;
 pub mod error;
 pub mod rpc;
 pub mod session;

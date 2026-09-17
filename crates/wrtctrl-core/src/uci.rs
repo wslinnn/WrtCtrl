@@ -23,8 +23,8 @@ use std::time::Duration;
 /// （跨网 confirm 余量，勿改）
 pub const ROLLBACK_TIMEOUT_SECS: u64 = 120;
 
-/// 旧 callUbus 默认 HTTP 超时 8s
-const UCI_CALL_TIMEOUT: Duration = Duration::from_secs(8);
+/// uci 与候选/探测类调用共用 8s 超时（uci 与候选/探测类调用共用）
+pub const UCI_CALL_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// UCI section（get 的类型化产物，元数据键 .type/.anonymous/.name 归位）
 #[derive(Debug, Clone, serde::Serialize)]
