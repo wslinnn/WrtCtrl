@@ -5,6 +5,7 @@
 
 use crate::rpc::RouterClient;
 use serde::Serialize;
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 const PING_TIMEOUT: Duration = Duration::from_secs(5);
@@ -29,14 +30,16 @@ pub fn ping_level(ms: u64) -> PingLevel {
 }
 
 impl RouterClient {
-    /// HTTP 探活任意设备根 URL（设备列表页并行 ping 多台用）；离线/超时 → None。
-    /// 语义对齐旧 pingDevice：收到任意 HTTP 响应（含 302/404）即算可达，不检查状态码。
+    /// 探活任意设备根 URL（设备列表页并行 ping 多台用）。
+    /// 原生化升级：优先 ICMP（Android 自带 /system/bin/ping，无需 root，rtt 更真实），
+    /// 失败回落 HTTP HEAD（收到任意响应即可达，不检查状态码）。
     pub async fn ping_url(&self, base_url: &str) -> Option<u64> {
-        let url = format!("{}/", base_url.trim_end_matches('/'));
-        let start = Instant::now();
-        let fut = self.http.get(&url).send();
-        tokio::time::timeout(PING_TIMEOUT, fut).await.ok()?.ok()?;
-        Some(start.elapsed().as_millis() as u64)
+        if let Some(host) = host_of(base_url) {
+            if let Some(ms) = icmp_ping(&host).await {
+                return Some(ms);
+            }
+        }
+        http_probe(self, base_url).await
     }
 
     /// 探活当前设备
@@ -49,6 +52,50 @@ impl RouterClient {
             .map(|d| d.base_url.clone())?;
         self.ping_url(&base).await
     }
+}
+
+/// 从 baseUrl 提取主机名（去 scheme/端口/路径；IPv6 字面量去方括号）
+fn host_of(base_url: &str) -> Option<String> {
+    let rest = base_url.split("://").nth(1).unwrap_or(base_url);
+    let host_port = rest.split('/').next()?;
+    if let Some(inner) = host_port.strip_prefix('[') {
+        return Some(inner.split(']').next()?.to_string());
+    }
+    let host = host_port.split(':').next()?;
+    (!host.is_empty()).then(|| host.to_string())
+}
+
+/// ICMP 探活：/system/bin/ping -c1 -W2（阻塞执行放 spawn_blocking，rtt 从输出解析）
+async fn icmp_ping(host: &str) -> Option<u64> {
+    let host = host.to_string();
+    let start = Instant::now();
+    let output = tokio::task::spawn_blocking(move || {
+        Command::new("/system/bin/ping")
+            .args(["-c", "1", "-W", "2", &host])
+            .output()
+            .ok()
+    })
+    .await
+    .ok()??;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed = stdout
+        .split("time=")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|s| s.parse::<f64>().ok())
+        .map(|ms| ms.round() as u64);
+    Some(parsed.unwrap_or_else(|| start.elapsed().as_millis() as u64))
+}
+
+/// HTTP HEAD 探活（ICMP 不可用时的兜底；uhttpd 支持 HEAD）
+async fn http_probe(client: &RouterClient, base_url: &str) -> Option<u64> {
+    let url = format!("{}/", base_url.trim_end_matches('/'));
+    let start = Instant::now();
+    client.http_head_ok(&url, PING_TIMEOUT).await.ok()?;
+    Some(start.elapsed().as_millis() as u64)
 }
 
 #[cfg(test)]

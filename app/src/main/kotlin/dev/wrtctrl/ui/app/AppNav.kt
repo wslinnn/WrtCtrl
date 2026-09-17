@@ -5,8 +5,13 @@ import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Devices
@@ -14,17 +19,20 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Lan
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +46,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import java.io.File
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.wrtctrl.R
@@ -66,14 +75,59 @@ fun AppRoot() {
     val vm: AppViewModel = viewModel(factory = viewModelFactory { initializer { AppViewModel(app) } })
     val phase by vm.phase.collectAsStateWithLifecycle()
     var showLanguage by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    var crashText by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        val file = File(context.filesDir, "last_crash.txt")
+        if (file.exists()) crashText = runCatching { file.readText() }.getOrNull()
+    }
 
-    when {
-        showLanguage -> LanguageScreen(onBack = { showLanguage = false })
-        phase == Phase.Boot -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
+    Column(Modifier.fillMaxSize()) {
+        crashText?.let { crash ->
+            Card(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
+                colors = androidx.compose.material3.CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                ),
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            stringResource(R.string.debug_last_crash),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                        TextButton(onClick = {
+                            context.filesDir.resolve("last_crash.txt").delete()
+                            crashText = null
+                        }) {
+                            Text(
+                                stringResource(R.string.common_delete),
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                            )
+                        }
+                    }
+                    Text(
+                        crash,
+                        Modifier.height(160.dp).verticalScroll(rememberScrollState()),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                }
+            }
         }
-        phase == Phase.Gate -> DeviceGateScreen(vm, onOpenLanguage = { showLanguage = true })
-        phase == Phase.Main -> MainTabs(vm, onOpenLanguage = { showLanguage = true })
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                showLanguage -> LanguageScreen(onBack = { showLanguage = false })
+                phase == Phase.Boot -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+                phase == Phase.Gate -> DeviceGateScreen(vm, onOpenLanguage = { showLanguage = true })
+                phase == Phase.Main -> MainTabs(vm, onOpenLanguage = { showLanguage = true })
+            }
+        }
     }
 }
 

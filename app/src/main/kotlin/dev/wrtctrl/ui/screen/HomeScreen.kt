@@ -81,6 +81,8 @@ fun HomeScreen(vm: HomeViewModel, modifier: Modifier = Modifier) {
             InfoRow(stringResource(R.string.home_model), state.model)
             InfoRow(stringResource(R.string.home_system_name), state.hostname)
             InfoRow(stringResource(R.string.home_version_info), state.version)
+            InfoRow(stringResource(R.string.home_architecture), state.architecture)
+            InfoRow(stringResource(R.string.home_target_platform), state.target)
             InfoRow(stringResource(R.string.home_uptime), state.uptime)
             InfoRow(stringResource(R.string.home_cpu_load), state.load)
             InfoRow(stringResource(R.string.home_temperature), state.temperature)

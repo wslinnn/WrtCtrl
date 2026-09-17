@@ -163,4 +163,14 @@ impl RouterClient {
             .and_then(|d| d.session.clone())
             .unwrap_or_else(|| EMPTY_SESSION.to_string())
     }
+
+    /// HTTP HEAD 探活原语（ping 的兜底路径）：收到任意响应即视为可达，不检查状态码
+    pub(crate) async fn http_head_ok(&self, url: &str, timeout: Duration) -> Result<(), UbusError> {
+        let fut = self.http.head(url).send();
+        tokio::time::timeout(timeout, fut)
+            .await
+            .map_err(|_| UbusError::Timeout)?
+            .map(|_| ())
+            .map_err(|e| UbusError::Network(error_chain(&e)))
+    }
 }
