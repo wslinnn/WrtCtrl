@@ -38,6 +38,7 @@ object WrtCore {
     private external fun panicTestNative(): String
     private external fun setDeviceNative(cfgJson: String): String
     private external fun loginNative(): String
+    private external fun reconnectNative(): String
     private external fun callUbusNative(objectName: String, method: String, paramsJson: String, timeoutMs: Int): String
     private external fun uciGetNative(config: String): String
     private external fun uciAddNative(config: String, sectionType: String): String
@@ -104,6 +105,10 @@ object WrtCore {
     /** 登录成功返回 ubus_rpc_session（core 内部已就地切换会话） */
     suspend fun login(): String =
         call { loginNative() }.getJSONObject("data").getString("session")
+
+    /** 重连：探活当前会话，失败自动用存储凭证重登 */
+    suspend fun reconnect(): String =
+        call { reconnectNative() }.getJSONObject("data").getString("session")
 
     /** 通用 ubus 调用：页面级专用接口之外的兜底通道（页面级专用接口之外的兜底通道） */
     suspend fun callUbus(

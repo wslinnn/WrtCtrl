@@ -204,6 +204,21 @@ pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_loginNative(
     })
 }
 
+/// 重连：探活当前会话，失败自动用存储凭证重登
+#[no_mangle]
+pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_reconnectNative(
+    env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    guarded!(env, async {
+        client()
+            .reconnect()
+            .await
+            .map(|session| json!({"session": session}))
+            .map_err(UbusError::from)
+    })
+}
+
 #[no_mangle]
 pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_callUbusNative(
     mut env: JNIEnv,
