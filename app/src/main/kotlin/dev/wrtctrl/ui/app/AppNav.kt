@@ -41,11 +41,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.wrtctrl.R
-import dev.wrtctrl.bridge.WrtCore
 import dev.wrtctrl.ui.screen.DeviceGateScreen
+import dev.wrtctrl.ui.screen.HomeScreen
 import dev.wrtctrl.ui.screen.LanguageAction
 import dev.wrtctrl.ui.screen.LanguageScreen
 import dev.wrtctrl.viewmodel.AppViewModel
+import dev.wrtctrl.viewmodel.HomeViewModel
 import dev.wrtctrl.viewmodel.Phase
 
 private data class TabSpec(@StringRes val labelRes: Int, val icon: ImageVector)
@@ -108,35 +109,16 @@ private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
             when (selected) {
-                0 -> HomePlaceholder(vm, Modifier.fillMaxSize())
+                0 -> {
+                    val app = LocalContext.current.applicationContext as Application
+                    val homeVm: HomeViewModel = viewModel(
+                        factory = viewModelFactory { initializer { HomeViewModel(app) } }
+                    )
+                    HomeScreen(homeVm, Modifier.padding(padding).fillMaxSize())
+                }
                 else -> PlaceholderText(stringResource(TABS[selected].labelRes), Modifier.fillMaxSize())
             }
         }
-    }
-}
-
-@Composable
-private fun HomePlaceholder(vm: AppViewModel, modifier: Modifier = Modifier) {
-    // 初始保留：JNI 链路 + panic 防线；将替换为仪表盘
-    val device by vm.current.collectAsStateWithLifecycle()
-    val coreHello = remember { runCatching { WrtCore.hello() }.getOrElse { "JNI ERROR: ${it.message}" } }
-    var panicResult by remember { mutableStateOf<String?>(null) }
-    Column(
-        modifier = modifier.padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        device?.let {
-            Text(
-                stringResource(R.string.device_list_switch_current) + ": " + it.displayName,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Text(coreHello, style = MaterialTheme.typography.bodyMedium)
-        Button(onClick = { panicResult = runCatching { WrtCore.panicTest() }.getOrElse { "FAILED: ${it.message}" } }) {
-            Text(stringResource(R.string.debug_panic_drill))
-        }
-        panicResult?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
     }
 }
 
