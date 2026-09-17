@@ -2,7 +2,12 @@
 //!
 //! 分层约束：所有路由器 IO 唯一入口在本 crate；
 //! 安全写路径（rollback/confirm、session 预检、apply 白名单）只存在于这里。
-//! M0 为骨架：仅 JNI 链路冒烟与 panic 演练支撑；M1 填充 rpc/uci/session 全量实现。
+
+pub mod error;
+pub mod rpc;
+
+pub use error::UbusError;
+pub use rpc::{DeviceSession, RouterClient, EMPTY_SESSION};
 
 /// crate 版本（JNI hello 冒烟会带回给 Kotlin 侧）
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
