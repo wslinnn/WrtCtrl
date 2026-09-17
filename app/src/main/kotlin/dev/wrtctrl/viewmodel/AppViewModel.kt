@@ -273,7 +273,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         connecting = false,
                         formErrorText = str(textRes),
-                        formErrorDetail = e.message,
+                        // 认证错误的"ubus error 6"属调试噪音，不展示；其余保留原始信息便于反馈
+                        formErrorDetail = if (e.code == "auth") null else e.message,
                         formErrorCode = e.code,
                     )
                 }

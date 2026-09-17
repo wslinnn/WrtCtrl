@@ -24,6 +24,7 @@ use std::time::Duration;
 use tokio::runtime::Runtime;
 use wrtctrl_core::error::UbusError;
 use wrtctrl_core::rpc::RouterClient;
+use wrtctrl_core::session::LoginError;
 
 static INIT_HOOK: Once = Once::new();
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
@@ -89,6 +90,34 @@ fn error_json(e: &UbusError) -> Value {
     v
 }
 
+/// 登录错误专用信封：保留 auth/certificate 语义（经 UbusError 转换会压平成
+/// 通用 ubus 码，UI 层"认证失败/网络失败"的分支就失效了）
+fn login_error_json(e: &LoginError) -> Value {
+    let code = match e {
+        LoginError::Auth(_) => "auth",
+        LoginError::Timeout => "timeout",
+        LoginError::Certificate(_) => "certificate",
+        LoginError::Network(_) => "network",
+        LoginError::InvalidResponse(_) => "invalid_response",
+        LoginError::NoDevice => "no_device",
+    };
+    let mut v = json!({"code": code, "message": e.to_string()});
+    if let LoginError::Auth(c) = e {
+        v["ubus"] = json!(c);
+    }
+    v
+}
+
+fn respond_login<T: Serialize>(env: &mut JNIEnv, result: Result<T, LoginError>) -> jstring {
+    let value = match result {
+        Ok(data) => json!({"ok": true, "data": data}),
+        Err(e) => json!({"ok": false, "error": login_error_json(&e)}),
+    };
+    env.new_string(value.to_string())
+        .map(|s| s.into_raw())
+        .unwrap_or(std::ptr::null_mut())
+}
+
 fn respond<T: Serialize>(env: &mut JNIEnv, result: Result<T, UbusError>) -> jstring {
     let value = match result {
         Ok(data) => json!({"ok": true, "data": data}),
@@ -119,6 +148,26 @@ macro_rules! guarded {
             }
         };
         respond(&mut env, result)
+    }};
+}
+
+/// 登录/重连专用：错误信封保留 auth/certificate 语义
+macro_rules! guarded_login {
+    ($env:expr, $body:expr) => {{
+        init_panic_hook();
+        let mut env = $env;
+        let result = match catch_unwind(AssertUnwindSafe(|| runtime().block_on($body))) {
+            Ok(result) => result,
+            Err(_) => {
+                return respond_login::<Value>(
+                    &mut env,
+                    Err(LoginError::InvalidResponse(
+                        "panic: caught at the JNI boundary".into(),
+                    )),
+                );
+            }
+        };
+        respond_login(&mut env, result)
     }};
 }
 
@@ -195,12 +244,11 @@ pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_loginNative(
     env: JNIEnv,
     _class: JClass,
 ) -> jstring {
-    guarded!(env, async {
+    guarded_login!(env, async {
         client()
             .login()
             .await
             .map(|session| json!({"session": session}))
-            .map_err(UbusError::from)
     })
 }
 
@@ -210,12 +258,11 @@ pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_reconnectNative(
     env: JNIEnv,
     _class: JClass,
 ) -> jstring {
-    guarded!(env, async {
+    guarded_login!(env, async {
         client()
             .reconnect()
             .await
             .map(|session| json!({"session": session}))
-            .map_err(UbusError::from)
     })
 }
 

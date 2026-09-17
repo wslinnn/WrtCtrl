@@ -101,7 +101,7 @@
     <string name="device_list_login_failed_content">Incorrect username or password</string>
     <string name="device_list_error_network">Network connection error</string>
     <string name="device_list_error_auth">Incorrect username or password, please check login information</string>
-    <string name="device_list_error_certificate">SSL certificate verification failed. The certificate may be self-signed or invalid. iOS currently cannot force certificate errors to be ignored, you can use the HTTP protocol or the Android version first.I will consider using native frameworks to solve this problem in the future.</string>
+    <string name="device_list_error_certificate">SSL certificate verification failed. Check the device HTTPS configuration</string>
     <string name="device_list_error_other">Connection failed</string>
     <string name="home_loading">Loading device information...</string>
     <string name="home_openwrt_device">OpenWrt Device</string>

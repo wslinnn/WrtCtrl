@@ -386,11 +386,6 @@ private fun FormMode(vm: AppViewModel, state: GateUiState) {
                 ) {
                     Column(Modifier.padding(12.dp)) {
                         Text(
-                            stringResource(R.string.device_list_connection_failed),
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
-                        Text(
                             errorText,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onErrorContainer,

@@ -32,6 +32,15 @@ if (!localeDir || !resDir) {
   process.exit(1);
 }
 
+// 语义修正（文案冻结，覆盖在转换层做）：
+// 既有文案含过期指引（新核心默认接受自签证书，指引已不成立）
+const OVERRIDES = {
+  device_list_error_certificate: {
+    zh: 'SSL 证书验证失败，请检查设备的 HTTPS 配置',
+    en: 'SSL certificate verification failed. Check the device HTTPS configuration',
+  },
+};
+
 const zh = JSON.parse(readFileSync(join(localeDir, 'zh-Hans.json'), 'utf8'));
 const en = JSON.parse(readFileSync(join(localeDir, 'en.json'), 'utf8'));
 
@@ -105,8 +114,8 @@ for (const ns of ACTIVE_NS) {
     }
     if (indexByName.size) placeholderCount++;
     flat[key] = {
-      zh: escapeXml(toAndroidFormat(zhText, indexByName)),
-      en: escapeXml(toAndroidFormat(enText, indexByName)),
+      zh: escapeXml(toAndroidFormat(OVERRIDES[key]?.zh ?? zhText, indexByName)),
+      en: escapeXml(toAndroidFormat(OVERRIDES[key]?.en ?? enText, indexByName)),
     };
   }
 }
