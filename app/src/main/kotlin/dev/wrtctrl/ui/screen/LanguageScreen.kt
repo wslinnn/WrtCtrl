@@ -18,6 +18,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -33,20 +37,25 @@ private val OPTIONS = listOf(
     LanguageOption("en", R.string.language_english),
 )
 
-/**
- * 语言设置（per-app language）：Android 13+ 走系统级设置并自动持久化，
- * 12 及以下由 appcompat 回退 + autoStoreLocales 持久化（manifest 已注册）。
- * 切换后 Activity 自动重建生效。
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun LanguageScreen(onBack: () -> Unit) {
+private fun currentTagFromDelegate(): String {
     val tags = AppCompatDelegate.getApplicationLocales().toLanguageTags()
-    val currentTag = when {
+    return when {
         tags.startsWith("en") -> "en"
         tags.startsWith("zh") -> "zh-CN"
         else -> "system"
     }
+}
+
+/**
+ * 语言设置（per-app language）：Android 13+ 走系统级设置并自动持久化，
+ * 12 及以下由 appcompat 回退 + autoStoreLocales 持久化（manifest 已注册）。
+ * 切换后 Activity 自动重建生效；若切换后有效语言不变（如已处于系统语言时选
+ * "跟随系统"），不会触发重建——故选中态用本地可观察状态即时回显。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LanguageScreen(onBack: () -> Unit) {
+    var selectedTag by remember { mutableStateOf(currentTagFromDelegate()) }
 
     Scaffold(
         topBar = {
@@ -68,17 +77,20 @@ fun LanguageScreen(onBack: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             OPTIONS.forEach { option ->
-                val selected = currentTag == option.tag
+                val selected = selectedTag == option.tag
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .clickable {
-                            val locales = if (option.tag == "system") {
-                                LocaleListCompat.getEmptyLocaleList()
-                            } else {
-                                LocaleListCompat.forLanguageTags(option.tag)
+                            if (selectedTag != option.tag) {
+                                selectedTag = option.tag
+                                val locales = if (option.tag == "system") {
+                                    LocaleListCompat.getEmptyLocaleList()
+                                } else {
+                                    LocaleListCompat.forLanguageTags(option.tag)
+                                }
+                                AppCompatDelegate.setApplicationLocales(locales)
                             }
-                            AppCompatDelegate.setApplicationLocales(locales)
                         }
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
