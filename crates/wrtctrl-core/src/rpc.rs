@@ -32,6 +32,20 @@ pub struct RouterClient {
     pub(crate) session: Arc<RwLock<Option<DeviceSession>>>,
 }
 
+/// 错误因果链展开：reqwest 的 Display 只有最外层"error sending request for url"，
+/// 真正原因（DNS 失败/连接拒绝/证书/TLS 版本）在 source() 链里——全部翻出来，
+/// 否则用户看到错误也不知道为什么。
+pub(crate) fn error_chain(e: &dyn std::error::Error) -> String {
+    let mut msg = e.to_string();
+    let mut source = e.source();
+    while let Some(cause) = source {
+        msg.push_str(" ← ");
+        msg.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    msg
+}
+
 impl RouterClient {
     /// accept_invalid_certs：自签 HTTPS 场景（按设备配置；对应旧 x-uniauth 拦截器语义）。
     /// no_proxy：路由器是 LAN/VPN 直连目标，绝不能走系统代理——
@@ -106,7 +120,7 @@ impl RouterClient {
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| UbusError::Network(e.to_string()))?;
+                .map_err(|e| UbusError::Network(error_chain(&e)))?;
             let status = response.status();
             let payload: Value = response
                 .json()
