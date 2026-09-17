@@ -28,7 +28,7 @@ pub struct DeviceSession {
 
 /// 路由器客户端：持有 HTTP 客户端与当前设备会话
 pub struct RouterClient {
-    http: reqwest::Client,
+    pub(crate) http: reqwest::Client,
     pub(crate) session: Arc<RwLock<Option<DeviceSession>>>,
 }
 

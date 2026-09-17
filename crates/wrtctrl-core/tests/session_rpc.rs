@@ -97,7 +97,7 @@ async fn login_timeout_maps() {
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(json!({"result": [0, {}]}))
-                .set_delay(Duration::from_secs(5)),
+                .set_delay(Duration::from_secs(10)), // 明显大于 LOGIN_TIMEOUT(5s)，避免竞争
         )
         .mount(&server)
         .await;
