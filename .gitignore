@@ -1,0 +1,16 @@
+*.iml
+.gradle/
+/local.properties
+.idea/
+.DS_Store
+build/
+/captures
+.externalNativeBuild
+.cxx
+
+# Rust 构建产物（workspace 级 target/，由 gradle buildRustLibs 任务经 cargo-ndk 生成）
+app/src/main/jniLibs/
+/target/
+
+# 签名文件不入库（CI 由环境变量注入）
+release.keystore

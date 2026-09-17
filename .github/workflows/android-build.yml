@@ -1,0 +1,44 @@
+name: android-build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.2.12479018
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: sdkmanager --install "ndk;27.2.12479018" "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Rust tests
+        run: cargo test -p wrtctrl-core
+
+      - name: Build debug APK
+        run: ./gradlew --no-daemon assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wrtctrl-debug-apk
+          path: app/build/outputs/apk/debug/*.apk

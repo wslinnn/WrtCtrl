@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 手写资源（生成的 strings 在 strings_generated.xml，由 tools/gen-strings.mjs 产出） -->
+    <string name="app_name">WrtCtrl</string>
+    <!-- M0 临时调试入口（首页 panic 演练按钮），随调试 UI 一起移除 -->
+    <string name="debug_panic_drill">panic 演练</string>
+</resources>

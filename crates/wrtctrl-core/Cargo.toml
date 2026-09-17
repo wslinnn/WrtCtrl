@@ -1,0 +1,7 @@
+[package]
+name = "wrtctrl-core"
+version = "0.1.0"
+edition = "2021"
+description = "WrtCtrl 核心：OpenWrt rpcd ubus 通信、会话与 UCI 写路径规则（纯 Rust，可宿主机单测）"
+
+[dependencies]
