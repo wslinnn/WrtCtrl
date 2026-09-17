@@ -29,14 +29,17 @@ pub struct DeviceSession {
 /// 路由器客户端：持有 HTTP 客户端与当前设备会话
 pub struct RouterClient {
     http: reqwest::Client,
-    session: Arc<RwLock<Option<DeviceSession>>>,
+    pub(crate) session: Arc<RwLock<Option<DeviceSession>>>,
 }
 
 impl RouterClient {
-    /// accept_invalid_certs：自签 HTTPS 场景（按设备配置；对应旧 x-uniauth 拦截器语义）
+    /// accept_invalid_certs：自签 HTTPS 场景（按设备配置；对应旧 x-uniauth 拦截器语义）。
+    /// no_proxy：路由器是 LAN/VPN 直连目标，绝不能走系统代理——
+    /// 会把路由器凭证经第三方代理转发，且代理故障会伪装成路由器故障。
     pub fn new(accept_invalid_certs: bool) -> Self {
         let http = reqwest::Client::builder()
             .danger_accept_invalid_certs(accept_invalid_certs)
+            .no_proxy()
             .build()
             .expect("reqwest client build failed");
         Self {
@@ -100,5 +103,22 @@ impl RouterClient {
             return Err(UbusError::Ubus(code));
         }
         Ok(result.get(1).cloned().unwrap_or(Value::Null))
+    }
+
+    /// 就地更新会话 id（login 成功后调用；无设备上下文时静默忽略）
+    pub(crate) async fn update_session_id(&self, id: &str) {
+        if let Some(device) = self.session.write().await.as_mut() {
+            device.session = Some(id.to_string());
+        }
+    }
+
+    /// 当前会话 id（未登录返回全 0 临时会话，与 call_ubus 的兜底一致）
+    pub async fn current_session_id(&self) -> String {
+        self.session
+            .read()
+            .await
+            .as_ref()
+            .and_then(|d| d.session.clone())
+            .unwrap_or_else(|| EMPTY_SESSION.to_string())
     }
 }
