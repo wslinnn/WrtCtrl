@@ -106,7 +106,7 @@
     <string name="home_openwrt_device">OpenWrt设备</string>
     <string name="home_openwrt">OpenWrt</string>
     <string name="home_version_info">版本信息</string>
-    <string name="home_system_status">系统状态</string>
+    <string name="home_system_status">系统信息</string>
     <string name="home_model">设备型号</string>
     <string name="home_system_name">系统名称</string>
     <string name="home_hostname">主机名</string>
@@ -123,7 +123,7 @@
     <string name="home_resource_monitor">资源监控</string>
     <string name="home_memory_cache">内存缓存</string>
     <string name="home_connections">连接数</string>
-    <string name="home_network_status">网络状态</string>
+    <string name="home_network_status">网络信息</string>
     <string name="home_wan_ip">WAN</string>
     <string name="home_lan_ip">LAN</string>
     <string name="home_gateway">网关</string>

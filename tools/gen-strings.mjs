@@ -39,6 +39,15 @@ const OVERRIDES = {
     zh: 'SSL 证书验证失败，请检查设备的 HTTPS 配置',
     en: 'SSL certificate verification failed. Check the device HTTPS configuration',
   },
+  // 2026-09-19 首页二轮：卡片定名（系统状态→系统信息、网络状态→网络信息）
+  home_system_status: {
+    zh: '系统信息',
+    en: 'System info',
+  },
+  home_network_status: {
+    zh: '网络信息',
+    en: 'Network info',
+  },
 };
 
 // 不迁移的键（两语言都有，不触发孤儿断言，需显式丢弃；均已核实新仓库零引用）：

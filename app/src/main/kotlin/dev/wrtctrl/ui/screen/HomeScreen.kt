@@ -33,11 +33,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,6 +50,9 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -88,7 +89,18 @@ private const val TX_COLOR = 0xFF00C4CC
 private const val RX_AREA = 0x2E4FACFE
 private const val TX_AREA = 0x2800C4CC
 
-/** 首页仪表盘：卡片顺序/显隐由 DashboardPrefs 驱动（编辑页配置），折叠状态按卡片 id 记忆 */
+/** 等宽数字：速率/百分比高频变化时不因数字宽度抖动带动布局跳动 */
+private const val FONT_FEATURE_TABULAR = "tnum"
+
+/** 资源监控环的一条规格：centerText 非空时环中心显示它（如温度 ℃），否则显示百分比 */
+private data class RingSpec(
+    val label: String,
+    val percent: Int,
+    val centerText: String?,
+    val detail: String?,
+)
+
+/** 首页仪表盘：卡片顺序/显隐由 DashboardPrefs 驱动（编辑页配置），折叠态同库持久化（跨重启记忆） */
 @Composable
 fun HomeScreen(vm: HomeViewModel, modifier: Modifier = Modifier) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -117,38 +129,51 @@ fun HomeScreen(vm: HomeViewModel, modifier: Modifier = Modifier) {
     ) {
         state.cardOrder.filter { it in state.cardEnabled }.forEach { cardId ->
             key(cardId) {
-                DashboardCardBody(cardId, state)
+                DashboardCardBody(cardId, state, onToggle = vm::toggleCollapsed)
             }
+        }
+        state.lastUpdated?.let { ts ->
+            val fmt = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+            Text(
+                stringResource(R.string.home_last_update, fmt.format(Date(ts))),
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
         }
     }
 }
 
-/** 单张仪表盘卡（按 id 分发；显隐与顺序由外层决定） */
+/** 单张仪表盘卡（按 id 分发；显隐与顺序由外层决定，展开态受控于 UiState.collapsed） */
 @Composable
-private fun DashboardCardBody(cardId: DashboardCardId, state: HomeUiState) {
+private fun DashboardCardBody(
+    cardId: DashboardCardId,
+    state: HomeUiState,
+    onToggle: (DashboardCardId) -> Unit,
+) {
+    val expanded = cardId !in state.collapsed
     when (cardId) {
-        DashboardCardId.RESOURCE -> CollapsibleCard(
-            stringResource(R.string.home_resource_monitor),
-            initiallyExpanded = true,
-        ) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                RingColumn(
-                    label = stringResource(R.string.home_memory),
-                    percent = state.memoryPercent,
-                    detail = state.memoryDetail,
-                )
-                val disk = state.mounts.firstOrNull { it.mount == "/overlay" } ?: state.mounts.firstOrNull()
-                RingColumn(
-                    label = stringResource(R.string.home_overlay),
-                    percent = disk?.usagePercent ?: 0,
-                    detail = disk?.detail ?: "--",
-                )
+        DashboardCardId.RESOURCE -> {
+            val disk = state.mounts.firstOrNull { it.mount == "/overlay" } ?: state.mounts.firstOrNull()
+            CollapsibleCard(
+                title = stringResource(R.string.home_resource_monitor),
+                expanded = expanded,
+                onToggle = { onToggle(cardId) },
+                summary = stringResource(R.string.home_memory) + " ${state.memoryPercent}% · " +
+                    stringResource(R.string.home_overlay) + " ${disk?.usagePercent ?: 0}%",
+            ) {
+                ResourceRings(state)
             }
         }
 
         DashboardCardId.BANDWIDTH -> CollapsibleCard(
-            stringResource(R.string.statistics_bandwidth) + " · " + state.bandwidthSource.uppercase(),
-            initiallyExpanded = true,
+            title = stringResource(R.string.statistics_bandwidth) + " · " + state.bandwidthSource.uppercase(),
+            expanded = expanded,
+            onToggle = { onToggle(cardId) },
+            summary = "↓ ${Format.rate(state.rxRate)} ↑ ${Format.rate(state.txRate)}",
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 RateBlock(label = "↓ RX", rate = state.rxRate, color = Color(RX_COLOR))
@@ -162,26 +187,45 @@ private fun DashboardCardBody(cardId: DashboardCardId, state: HomeUiState) {
             )
         }
 
-        DashboardCardId.SYSTEM -> CollapsibleCard(stringResource(R.string.home_system_status)) {
+        DashboardCardId.SYSTEM -> CollapsibleCard(
+            title = stringResource(R.string.home_system_status),
+            expanded = expanded,
+            onToggle = { onToggle(cardId) },
+            // 收起即可确认连的是哪台路由器，不必展开
+            summary = "${state.hostname} · ${state.model}",
+        ) {
             InfoRow(stringResource(R.string.home_model), state.model)
             InfoRow(stringResource(R.string.home_system_name), state.hostname)
             InfoRow(stringResource(R.string.home_version_info), state.version)
             InfoRow(stringResource(R.string.home_architecture), state.architecture)
             InfoRow(stringResource(R.string.home_target_platform), state.target)
             InfoRow(stringResource(R.string.home_uptime), state.uptime)
-            InfoRow(stringResource(R.string.home_cpu_load), state.load)
-            InfoRow(stringResource(R.string.home_temperature), state.temperature)
         }
 
-        DashboardCardId.NETWORK -> CollapsibleCard(stringResource(R.string.home_network_status)) {
-            InfoRow(stringResource(R.string.home_wan_ip), state.wanIp)
+        DashboardCardId.NETWORK -> CollapsibleCard(
+            title = stringResource(R.string.home_network_status),
+            expanded = expanded,
+            onToggle = { onToggle(cardId) },
+            summary = if (state.wanIp == "--") stringResource(R.string.home_no_ipv4) else state.wanIp,
+        ) {
+            val hasWan = state.wanIp != "--"
+            InfoRow(
+                stringResource(R.string.home_wan_ip),
+                value = if (hasWan) state.wanIp else stringResource(R.string.home_no_ipv4),
+                valueColor = if (hasWan) Color.Unspecified else MaterialTheme.colorScheme.error,
+            )
             InfoRow(stringResource(R.string.home_lan_ip), state.lanIp)
             InfoRow(stringResource(R.string.home_gateway), state.gateway)
             InfoRow(stringResource(R.string.home_dns), state.dns)
             InfoRow(stringResource(R.string.home_connections), state.connections)
         }
 
-        DashboardCardId.STORAGE -> CollapsibleCard(stringResource(R.string.home_disk_status)) {
+        DashboardCardId.STORAGE -> CollapsibleCard(
+            title = stringResource(R.string.home_disk_status),
+            expanded = expanded,
+            onToggle = { onToggle(cardId) },
+            summary = state.mounts.firstOrNull { it.mount == "/overlay" }?.let { "${it.usagePercent}%" } ?: "--",
+        ) {
             if (state.mounts.isEmpty()) {
                 Text(
                     "--",
@@ -209,18 +253,23 @@ private fun DashboardCardBody(cardId: DashboardCardId, state: HomeUiState) {
     }
 }
 
-/** 可折叠卡：点标题行展开/收起（箭头指示），展开状态切 Tab 保持；initiallyExpanded 控制默认态。
+/** 可折叠卡：点标题行展开/收起（箭头指示）。展开态受控（UiState.collapsed 持久化），收起时
+ *  卡头右侧显示该卡的关键摘要——收起态自身保有信息量，首页不展开也是完整仪表盘。
  *  动画只用 AnimatedVisibility 单一动画源——再叠 animateContentSize 会双重 measure 掉帧（卡顿根因）。 */
 @Composable
-private fun CollapsibleCard(title: String, initiallyExpanded: Boolean = false, content: @Composable () -> Unit) {
-    var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
+private fun CollapsibleCard(
+    title: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    summary: String? = null,
+    content: @Composable () -> Unit,
+) {
     Card(Modifier.fillMaxWidth()) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .clickable { expanded = !expanded }
+                .clickable(onClick = onToggle)
                 .padding(horizontal = 16.dp, vertical = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -228,8 +277,20 @@ private fun CollapsibleCard(title: String, initiallyExpanded: Boolean = false, c
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(Modifier.weight(1f))
+            if (!expanded && !summary.isNullOrBlank()) {
+                Text(
+                    summary,
+                    Modifier.padding(start = 12.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Text(
                 if (expanded) "▾" else "▸",
+                Modifier.padding(start = 8.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -249,14 +310,15 @@ private fun CollapsibleCard(title: String, initiallyExpanded: Boolean = false, c
 }
 
 @Composable
-private fun InfoRow(label: String, value: String) {
+private fun InfoRow(label: String, value: String, valueColor: Color = Color.Unspecified) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
         Text(
             value,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Medium,
-            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            textAlign = TextAlign.End,
+            color = valueColor,
         )
     }
 }
@@ -265,7 +327,41 @@ private fun InfoRow(label: String, value: String) {
 private fun RateBlock(label: String, rate: Long, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = color)
-        Text(Format.rate(rate), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(
+            Format.rate(rate),
+            style = MaterialTheme.typography.titleLarge.copy(fontFeatureSettings = FONT_FEATURE_TABULAR),
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+/** 资源监控环组：算力对（CPU/温度）→ 容量对（内存/磁盘）。环数 ≤2 用大环（104dp，即旧双环形态），
+ *  3-4 环收紧为 80dp；数据不可得的环（无温度传感器等）整环隐藏，不留占位。 */
+@Composable
+private fun ResourceRings(state: HomeUiState) {
+    val disk = state.mounts.firstOrNull { it.mount == "/overlay" } ?: state.mounts.firstOrNull()
+    val specs = buildList {
+        state.cpuPercent?.let { add(RingSpec(stringResource(R.string.home_cpu), it, "$it%", state.load)) }
+        state.tempC?.let { temp ->
+            // 环弧映射：40℃=空，90℃=满（路由器结温健康区间），中心显示实际读数
+            val percent = (((temp - 40) / 50.0) * 100).roundToInt().coerceIn(0, 100)
+            add(RingSpec(stringResource(R.string.home_temperature), percent, "$temp℃", null))
+        }
+        add(RingSpec(stringResource(R.string.home_memory), state.memoryPercent, null, state.memoryDetail))
+        add(
+            RingSpec(
+                stringResource(R.string.home_overlay),
+                disk?.usagePercent ?: 0,
+                null,
+                disk?.detail,
+            ),
+        )
+    }
+    val ringSize = if (specs.size <= 2) 104.dp else 80.dp
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+        specs.forEach { spec ->
+            RingColumn(spec.label, spec.percent, spec.centerText, spec.detail, ringSize)
+        }
     }
 }
 
@@ -290,9 +386,16 @@ private fun UsageBar(percent: Int, modifier: Modifier = Modifier) {
     }
 }
 
-/** 环形进度：渐变弧 + 圆头端帽 + 进度动画；环中心「标签 + 百分比」 */
+/** 环形进度：渐变弧 + 圆头端帽 + 进度动画；环中心「标签 + 读数」（centerText 缺省为百分比）。
+ *  弧线绘制矩形向内缩半个描边：描边以画布边界为中心线会外溢半宽，是展开时压到卡头的重叠根因。 */
 @Composable
-private fun Ring(label: String, percent: Int, modifier: Modifier = Modifier) {
+private fun Ring(
+    label: String,
+    percent: Int,
+    centerText: String? = null,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+) {
     val animated by animateFloatAsState(
         targetValue = percent / 100f,
         animationSpec = tween(600),
@@ -302,12 +405,16 @@ private fun Ring(label: String, percent: Int, modifier: Modifier = Modifier) {
     val brush = Brush.linearGradient(listOf(Color(RX_COLOR), Color(TX_COLOR)))
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val stroke = 12.dp.toPx()
+            val stroke = size.minDimension * 0.11f
+            val arcSize = Size(size.width - stroke, size.height - stroke)
+            val topLeft = Offset(stroke / 2f, stroke / 2f)
             drawArc(
                 color = track,
                 startAngle = -90f,
                 sweepAngle = 360f,
                 useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
                 style = Stroke(stroke, cap = StrokeCap.Round),
             )
             drawArc(
@@ -315,35 +422,53 @@ private fun Ring(label: String, percent: Int, modifier: Modifier = Modifier) {
                 startAngle = -90f,
                 sweepAngle = 360f * animated.coerceIn(0f, 1f),
                 useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
                 style = Stroke(stroke, cap = StrokeCap.Round),
             )
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 label,
-                style = MaterialTheme.typography.labelMedium,
+                style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                "${(animated * 100).toInt()}%",
-                style = MaterialTheme.typography.titleMedium,
+                centerText ?: "${(animated * 100).toInt()}%",
+                style = (if (compact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium)
+                    .copy(fontFeatureSettings = FONT_FEATURE_TABULAR),
                 fontWeight = FontWeight.Bold,
             )
         }
     }
 }
 
-/** 资源监控双环单元：环 + 环下用量明细（used / total） */
+/** 资源监控环单元：环 + 环下明细（内存/磁盘=used/total，CPU=负载均值；空明细不占位） */
 @Composable
-private fun RingColumn(label: String, percent: Int, detail: String) {
+private fun RingColumn(
+    label: String,
+    percent: Int,
+    centerText: String?,
+    detail: String?,
+    ringSize: Dp,
+) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Ring(label, percent, Modifier.size(104.dp))
-        Spacer(Modifier.height(12.dp))
-        Text(
-            detail,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        Ring(
+            label = label,
+            percent = percent,
+            centerText = centerText,
+            modifier = Modifier.size(ringSize),
+            compact = ringSize < 100.dp,
         )
+        if (!detail.isNullOrBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 

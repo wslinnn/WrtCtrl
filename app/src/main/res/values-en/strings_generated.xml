@@ -106,7 +106,7 @@
     <string name="home_openwrt_device">OpenWrt Device</string>
     <string name="home_openwrt">OpenWrt</string>
     <string name="home_version_info">Version Info</string>
-    <string name="home_system_status">System Status</string>
+    <string name="home_system_status">System info</string>
     <string name="home_model">Model</string>
     <string name="home_system_name">System Name</string>
     <string name="home_hostname">Hostname</string>
@@ -123,7 +123,7 @@
     <string name="home_resource_monitor">Resource Monitor</string>
     <string name="home_memory_cache">Memory Cache</string>
     <string name="home_connections">Connections</string>
-    <string name="home_network_status">Network Status</string>
+    <string name="home_network_status">Network info</string>
     <string name="home_wan_ip">WAN</string>
     <string name="home_lan_ip">LAN</string>
     <string name="home_gateway">Gateway</string>

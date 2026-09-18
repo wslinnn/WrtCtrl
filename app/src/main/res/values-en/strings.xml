@@ -10,4 +10,7 @@
     <!-- Dashboard card editing (card names reuse existing keys) -->
     <string name="dashboard_edit_title">Edit dashboard</string>
     <string name="dashboard_edit_hint">Long-press and drag to reorder; toggle to show or hide</string>
+    <!-- Home round 2: resource rings / degradation / timestamp (home_cpu reuses generated key) -->
+    <string name="home_no_ipv4">No IPv4</string>
+    <string name="home_last_update">Updated %1$s</string>
 </resources>

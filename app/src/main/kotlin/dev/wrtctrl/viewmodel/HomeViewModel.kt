@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
+import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -35,7 +36,7 @@ data class MountInfo(
 
 data class HomeUiState(
     val loading: Boolean = true,
-    // 系统状态卡
+    // 系统信息卡（CPU 负载与温度移入资源监控环，此处只留静态标识 + 运行时间）
     val model: String = "--",
     val hostname: String = "--",
     val version: String = "--",
@@ -43,7 +44,9 @@ data class HomeUiState(
     val target: String = "--",
     val uptime: String = "--",
     val load: String = "--",
-    val temperature: String = "--",
+    // 资源监控环：null = 数据不可得（无传感器/解析失败）→ 该环隐藏（空态守卫）
+    val cpuPercent: Int? = null,
+    val tempC: Int? = null,
     // 内存
     val memoryPercent: Int = 0,
     val memoryDetail: String = "--",
@@ -65,6 +68,9 @@ data class HomeUiState(
     // 卡片自定义
     val cardOrder: List<DashboardCardId> = DashboardPrefs.DEFAULT.order,
     val cardEnabled: Set<DashboardCardId> = DashboardPrefs.DEFAULT.enabled,
+    val collapsed: Set<DashboardCardId> = DashboardPrefs.DEFAULT.collapsed,
+    // 最近一次成功拉取时间（连续失败时停走 → 用户可感知数据冻结）
+    val lastUpdated: Long? = null,
 )
 
 /**
@@ -89,18 +95,36 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             dashboardPrefs.configFlow().collect { config ->
-                _state.update { it.copy(cardOrder = config.order, cardEnabled = config.enabled) }
+                _state.update {
+                    it.copy(
+                        cardOrder = config.order,
+                        cardEnabled = config.enabled,
+                        collapsed = config.collapsed,
+                    )
+                }
             }
         }
     }
 
-    /** 编辑页即时保存（顺序 + 显隐） */
+    /** 编辑页即时保存（顺序 + 显隐；折叠态保持当前值不被动） */
     fun saveCardConfig(order: List<DashboardCardId>, enabled: Set<DashboardCardId>) {
-        viewModelScope.launch { dashboardPrefs.save(DashboardConfig(order, enabled)) }
+        val collapsed = _state.value.collapsed
+        viewModelScope.launch { dashboardPrefs.save(DashboardConfig(order, enabled, collapsed)) }
+    }
+
+    /** 卡头点击展开/收起：本地立即生效 + 异步持久化（跨重启记忆） */
+    fun toggleCollapsed(cardId: DashboardCardId) {
+        val newCollapsed = _state.value.collapsed
+            .let { if (cardId in it) it - cardId else it + cardId }
+        _state.update { it.copy(collapsed = newCollapsed) }
+        val snapshot = _state.value
+        viewModelScope.launch {
+            dashboardPrefs.save(DashboardConfig(snapshot.cardOrder, snapshot.cardEnabled, newCollapsed))
+        }
     }
 
     private suspend fun pollOnce() {
-        val (board, info, connCount, connMax, ifaceDump, temp, mounts) = coroutineScope {
+        val (board, info, connCount, connMax, ifaceDump, temp, mounts, cpu) = coroutineScope {
             val board = async { ubusSafe("system", "board") }
             val info = async { ubusSafe("system", "info") }
             val connCount = async { readSafe("/proc/sys/net/netfilter/nf_conntrack_count") }
@@ -108,9 +132,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             val ifaceDump = async { ubusSafe("network.interface", "dump") }
             val temp = async { ubusSafe("luci", "getTempInfo") }
             val mounts = async { ubusSafe("luci", "getMountPoints") }
+            val cpu = async { ubusSafe("luci", "getCPUUsage") }
             HomePoll(
                 board.await(), info.await(), connCount.await(), connMax.await(),
-                ifaceDump.await(), temp.await(), mounts.await(),
+                ifaceDump.await(), temp.await(), mounts.await(), cpu.await(),
             )
         }
 
@@ -124,15 +149,22 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 target = board?.optJSONObject("release")?.optString("target", state.target) ?: state.target,
                 uptime = info?.optLong("uptime")?.let(Format::duration) ?: state.uptime,
                 load = info?.loadString() ?: state.load,
+                cpuPercent = cpu?.cpuPercent() ?: state.cpuPercent,
+                tempC = temp?.tempC() ?: state.tempC,
                 memoryPercent = info?.memoryPercent() ?: state.memoryPercent,
                 memoryDetail = info?.memoryDetail() ?: state.memoryDetail,
-                temperature = temp?.optString("tempinfo", state.temperature) ?: state.temperature,
                 connections = connectionsText(connCount, connMax) ?: state.connections,
                 wanIp = ifaceDump?.wanIp() ?: state.wanIp,
                 lanIp = ifaceDump?.lanIp() ?: state.lanIp,
                 gateway = ifaceDump?.gateway() ?: state.gateway,
                 dns = ifaceDump?.dns() ?: state.dns,
                 mounts = mounts?.mountList() ?: state.mounts,
+                // 任一主数据源成功才推进时间戳：全失败（断线）时旧时间停走，用户可感知数据冻结
+                lastUpdated = if (board != null || info != null || ifaceDump != null) {
+                    System.currentTimeMillis()
+                } else {
+                    state.lastUpdated
+                },
             )
         }
 
@@ -214,6 +246,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val ifaceDump: JSONObject?,
         val temp: JSONObject?,
         val mounts: JSONObject?,
+        val cpu: JSONObject?,
     )
 
     private fun JSONObject.model(): String {
@@ -236,6 +269,26 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val arr = optJSONArray("load") ?: return null
         if (arr.length() < 3) return null
         return (0 until 3).joinToString(" ") { String.format("%.2f", arr.optDouble(it) / 65536.0) }
+    }
+
+    /** CPU 使用率（%）。数据源 = luci getCPUUsage 的 cpuusage 字段——部分回退：
+     *  原字段因无人展示按死代码砍除，现 CPU 环有真实需求复活为活调用；
+     *  多分支格式兼容不保留，只走单条解析路径，失败返回 null 隐藏环。 */
+    private fun JSONObject.cpuPercent(): Int? {
+        val raw = opt("cpuusage")?.toString() ?: return null
+        val m = Regex("([0-9]+(?:\\.[0-9]+)?)").find(raw) ?: return null
+        var v = m.groupValues[1].toDoubleOrNull() ?: return null
+        if (v <= 1.0) v *= 100.0
+        return v.coerceIn(0.0, 100.0).roundToInt()
+    }
+
+    /** 温度（℃）。取 tempinfo 首个数字；无传感器/为 0 → null，调用方隐藏温度环 */
+    private fun JSONObject.tempC(): Int? {
+        val raw = opt("tempinfo")?.toString() ?: return null
+        val m = Regex("([0-9]+(?:\\.[0-9]+)?)").find(raw) ?: return null
+        val v = m.groupValues[1].toDoubleOrNull() ?: return null
+        if (v <= 0.0) return null
+        return v.roundToInt()
     }
 
     private fun JSONObject.memoryPercent(): Int {
