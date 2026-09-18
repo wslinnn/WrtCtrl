@@ -44,6 +44,8 @@ data class GateUiState(
     val formErrorCode: String? = null,
     val connecting: Boolean = false,
     val editingId: String? = null,
+    /** 列表下拉刷新进行中 */
+    val refreshing: Boolean = false,
 )
 
 /**
@@ -158,6 +160,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun returnToMain() {
         gateCameFromMain = false
         _phase.value = Phase.Main
+    }
+
+    /** 列表下拉刷新：重读设备 + 重跑并行探活（pings 清空回到"检测中"态）；不动 phase 与快速切换标记 */
+    fun refreshDeviceList() {
+        if (_gate.value.refreshing) return
+        viewModelScope.launch {
+            _gate.update { it.copy(refreshing = true) }
+            val devices = repo.list()
+            _gate.update {
+                it.copy(refreshing = false, devices = devices, pings = emptyMap(), bannerError = null)
+            }
+            pingAll(devices)
+        }
     }
 
     fun openForm(device: Device?) {

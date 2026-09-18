@@ -69,8 +69,8 @@ data class HomeUiState(
     val cardOrder: List<DashboardCardId> = DashboardPrefs.DEFAULT.order,
     val cardEnabled: Set<DashboardCardId> = DashboardPrefs.DEFAULT.enabled,
     val collapsed: Set<DashboardCardId> = DashboardPrefs.DEFAULT.collapsed,
-    // 最近一次成功拉取时间（连续失败时停走 → 用户可感知数据冻结）
-    val lastUpdated: Long? = null,
+    /** 下拉刷新进行中 */
+    val refreshing: Boolean = false,
 )
 
 /**
@@ -123,6 +123,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** 下拉刷新：立即补一轮拉取（与 3s 自动轮询并存；进行中重复触发忽略） */
+    fun refresh() {
+        if (_state.value.refreshing) return
+        viewModelScope.launch {
+            _state.update { it.copy(refreshing = true) }
+            pollOnce()
+            _state.update { it.copy(refreshing = false) }
+        }
+    }
+
     private suspend fun pollOnce() {
         val (board, info, connCount, connMax, ifaceDump, temp, mounts, cpu) = coroutineScope {
             val board = async { ubusSafe("system", "board") }
@@ -159,12 +169,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 gateway = ifaceDump?.gateway() ?: state.gateway,
                 dns = ifaceDump?.dns() ?: state.dns,
                 mounts = mounts?.mountList() ?: state.mounts,
-                // 任一主数据源成功才推进时间戳：全失败（断线）时旧时间停走，用户可感知数据冻结
-                lastUpdated = if (board != null || info != null || ifaceDump != null) {
-                    System.currentTimeMillis()
-                } else {
-                    state.lastUpdated
-                },
             )
         }
 

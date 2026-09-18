@@ -27,8 +27,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -100,7 +102,9 @@ private data class RingSpec(
     val detail: String?,
 )
 
-/** 首页仪表盘：卡片顺序/显隐由 DashboardPrefs 驱动（编辑页配置），折叠态同库持久化（跨重启记忆） */
+/** 首页仪表盘：卡片顺序/显隐由 DashboardPrefs 驱动（编辑页配置），折叠态同库持久化（跨重启记忆）；
+ *  下拉刷新立即补一轮拉取（与 3s 自动轮询并存） */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(vm: HomeViewModel, modifier: Modifier = Modifier) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -120,29 +124,23 @@ fun HomeScreen(vm: HomeViewModel, modifier: Modifier = Modifier) {
         }
         return
     }
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+    PullToRefreshBox(
+        isRefreshing = state.refreshing,
+        onRefresh = vm::refresh,
+        modifier = modifier.fillMaxSize(),
     ) {
-        state.cardOrder.filter { it in state.cardEnabled }.forEach { cardId ->
-            key(cardId) {
-                DashboardCardBody(cardId, state, onToggle = vm::toggleCollapsed)
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            state.cardOrder.filter { it in state.cardEnabled }.forEach { cardId ->
+                key(cardId) {
+                    DashboardCardBody(cardId, state, onToggle = vm::toggleCollapsed)
+                }
             }
-        }
-        state.lastUpdated?.let { ts ->
-            val fmt = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
-            Text(
-                stringResource(R.string.home_last_update, fmt.format(Date(ts))),
-                Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
         }
     }
 }
@@ -335,8 +333,8 @@ private fun RateBlock(label: String, rate: Long, color: Color) {
     }
 }
 
-/** 资源监控环组：算力对（CPU/温度）→ 容量对（内存/磁盘）。环数 ≤2 用大环（104dp，即旧双环形态），
- *  3-4 环收紧为 80dp；数据不可得的环（无温度传感器等）整环隐藏，不留占位。 */
+/** 资源监控环组：算力对（CPU/温度）→ 容量对（内存/磁盘），2×2 网格、104dp 大环——
+ *  一行四环在部分屏宽下环距归零且明细文字换行错位（已否决）；数据不可得的环整格移除，余环自动聚拢。 */
 @Composable
 private fun ResourceRings(state: HomeUiState) {
     val disk = state.mounts.firstOrNull { it.mount == "/overlay" } ?: state.mounts.firstOrNull()
@@ -357,10 +355,13 @@ private fun ResourceRings(state: HomeUiState) {
             ),
         )
     }
-    val ringSize = if (specs.size <= 2) 104.dp else 80.dp
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-        specs.forEach { spec ->
-            RingColumn(spec.label, spec.percent, spec.centerText, spec.detail, ringSize)
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        specs.chunked(2).forEach { rowSpecs ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                rowSpecs.forEach { spec ->
+                    RingColumn(spec.label, spec.percent, spec.centerText, spec.detail, 104.dp)
+                }
+            }
         }
     }
 }

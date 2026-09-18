@@ -13,7 +13,6 @@
     <!-- 仪表盘卡片编辑（卡片名复用现有键） -->
     <string name="dashboard_edit_title">编辑仪表盘</string>
     <string name="dashboard_edit_hint">长按拖拽调整顺序，开关控制显示</string>
-    <!-- 首页二轮：资源监控环与降级/时间戳文案（home_cpu 复用生成键） -->
+    <!-- 首页：无 IPv4 降级文案（home_cpu 复用生成键；下拉刷新） -->
     <string name="home_no_ipv4">无 IPv4</string>
-    <string name="home_last_update">更新于 %1$s</string>
 </resources>

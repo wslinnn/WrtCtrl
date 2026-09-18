@@ -45,6 +45,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -110,43 +111,49 @@ private fun ListMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () ->
             }
         },
     ) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize()) {
-            if (state.connecting) {
-                LinearProgressIndicator(Modifier.fillMaxWidth())
-            }
-            state.bannerError?.let { banner ->
-                Card(
-                    Modifier.fillMaxWidth().padding(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                ) {
-                    Text(
-                        banner,
-                        Modifier.padding(12.dp),
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
+        PullToRefreshBox(
+            isRefreshing = state.refreshing,
+            onRefresh = vm::refreshDeviceList,
+            modifier = Modifier.padding(padding).fillMaxSize(),
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                if (state.connecting) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
-            }
-            if (state.devices.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        stringResource(R.string.device_list_history_empty),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            } else {
-                LazyColumn(Modifier.fillMaxSize()) {
-                    items(state.devices, key = { it.id }) { device ->
-                        DeviceCard(
-                            device = device,
-                            pingMs = state.pings[device.id],
-                            isCurrent = vm.current.value?.id == device.id,
-                            connecting = state.connecting,
-                            onClick = { vm.connectTo(device) },
-                            onEdit = { vm.openForm(device) },
-                            onDelete = { deleting = device },
+                state.bannerError?.let { banner ->
+                    Card(
+                        Modifier.fillMaxWidth().padding(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    ) {
+                        Text(
+                            banner,
+                            Modifier.padding(12.dp),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodyMedium,
                         )
+                    }
+                }
+                if (state.devices.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            stringResource(R.string.device_list_history_empty),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    LazyColumn(Modifier.fillMaxSize()) {
+                        items(state.devices, key = { it.id }) { device ->
+                            DeviceCard(
+                                device = device,
+                                pingMs = state.pings[device.id],
+                                isCurrent = vm.current.value?.id == device.id,
+                                connecting = state.connecting,
+                                onClick = { vm.connectTo(device) },
+                                onEdit = { vm.openForm(device) },
+                                onDelete = { deleting = device },
+                            )
+                        }
                     }
                 }
             }
