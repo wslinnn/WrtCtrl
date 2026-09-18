@@ -41,6 +41,10 @@ const OVERRIDES = {
   },
 };
 
+// 不迁移的键（两语言都有，不触发孤儿断言，需显式丢弃；均已核实新仓库零引用）：
+// - device_list_ping_hint: "延迟为 HTTP 响应时间，仅供参考"——延迟已是真 ICMP ping，提示不再成立
+const DROP_KEYS = new Set(['device_list_ping_hint']);
+
 const zh = JSON.parse(readFileSync(join(localeDir, 'zh-Hans.json'), 'utf8'));
 const en = JSON.parse(readFileSync(join(localeDir, 'en.json'), 'utf8'));
 
@@ -98,7 +102,7 @@ for (const ns of ACTIVE_NS) {
   for (const k of onlyZh) dropped.push(`${ns}:${k}(仅中文)`);
   for (const k of onlyEn) dropped.push(`${ns}:${k}(仅英文)`);
   for (const key of zhKeys) {
-    if (!enKeys.has(key)) continue;
+    if (!enKeys.has(key) || DROP_KEYS.has(key)) continue;
     const zhText = zhMap.get(key);
     const enText = enMap.get(key);
     const zhNames = [...zhText.matchAll(PLACEHOLDER)].map((m) => m[1]).sort();

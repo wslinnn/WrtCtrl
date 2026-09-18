@@ -38,7 +38,6 @@
     <string name="device_list_login_prompt">连接您的路由器</string>
     <string name="device_list_ping_checking">检测中</string>
     <string name="device_list_ping_offline">离线</string>
-    <string name="device_list_ping_hint">延迟为 HTTP 响应时间,仅供参考</string>
     <string name="device_list_password_show">显示密码</string>
     <string name="device_list_password_hide">隐藏密码</string>
     <string name="device_list_history_title">历史设备</string>

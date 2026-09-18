@@ -134,14 +134,6 @@ private fun ListMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () ->
                 }
             } else {
                 LazyColumn(Modifier.fillMaxSize()) {
-                    item {
-                        Text(
-                            stringResource(R.string.device_list_ping_hint),
-                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
                     items(state.devices, key = { it.id }) { device ->
                         DeviceCard(
                             device = device,

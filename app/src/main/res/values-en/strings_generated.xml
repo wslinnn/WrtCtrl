@@ -38,7 +38,6 @@
     <string name="device_list_login_prompt">Connect your router</string>
     <string name="device_list_ping_checking">Checking</string>
     <string name="device_list_ping_offline">Offline</string>
-    <string name="device_list_ping_hint">Latency is HTTP response time, for reference only</string>
     <string name="device_list_password_show">Show password</string>
     <string name="device_list_password_hide">Hide password</string>
     <string name="device_list_history_title">Device History</string>
