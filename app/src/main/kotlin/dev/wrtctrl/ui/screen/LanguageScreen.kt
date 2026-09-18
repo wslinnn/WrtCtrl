@@ -1,5 +1,6 @@
 package dev.wrtctrl.ui.screen
 
+import androidx.activity.compose.BackHandler
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -55,6 +56,8 @@ private fun currentTagFromDelegate(): String {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LanguageScreen(onBack: () -> Unit) {
+    // 页面是组合级分支而非导航栈页，不拦截系统返回会直接退到桌面
+    BackHandler(onBack = onBack)
     var selectedTag by remember { mutableStateOf(currentTagFromDelegate()) }
 
     Scaffold(

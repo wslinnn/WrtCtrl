@@ -156,7 +156,7 @@ private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
                         }
                     }
                     // 设备切换入口（与门控页列表共用数据层，规格 B9）
-                    IconButton(onClick = { vm.openDeviceList() }) {
+                    IconButton(onClick = { vm.openDeviceList(fromMain = true) }) {
                         Icon(Icons.Filled.Devices, contentDescription = stringResource(R.string.device_list_history_title))
                     }
                     LanguageAction(onOpenLanguage)

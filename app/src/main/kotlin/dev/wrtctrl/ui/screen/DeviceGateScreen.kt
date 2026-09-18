@@ -1,5 +1,6 @@
 package dev.wrtctrl.ui.screen
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -70,6 +71,8 @@ import dev.wrtctrl.viewmodel.GateUiState
 /** 设备门控页（双形态）：列表（直连/编辑/删除）+ 添加·编辑表单。*/
 @Composable
 fun DeviceGateScreen(vm: AppViewModel, onOpenLanguage: () -> Unit = {}) {
+    // 快速切换场景（从主页顶栏进入）手势返回 = 取消切换回主页；启动/登录失败场景不拦截
+    BackHandler(enabled = vm.gateCameFromMain) { vm.returnToMain() }
     val state by vm.gate.collectAsState()
     when (state.mode) {
         GateMode.List -> ListMode(vm, state, onOpenLanguage)

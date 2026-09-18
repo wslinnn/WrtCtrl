@@ -2,6 +2,9 @@ package dev.wrtctrl.viewmodel
 
 import android.app.Application
 import androidx.annotation.StringRes
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.wrtctrl.R
@@ -123,12 +126,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     bannerError = if (ok) null else str(R.string.device_list_reconnect_failed),
                 )
             }
-            if (ok) _phase.value = Phase.Main
+            if (ok) {
+                gateCameFromMain = false
+                _phase.value = Phase.Main
+            }
         }
     }
 
+    /** Gate 页是否由 Main 顶栏进入（决定手势返回语义：回主页 or 留在门控） */
+    var gateCameFromMain by mutableStateOf(false)
+        private set
+
     /** 顶栏设备入口：回门控页列表形态（快速切换） */
-    fun openDeviceList() {
+    fun openDeviceList(fromMain: Boolean = false) {
+        gateCameFromMain = fromMain
         viewModelScope.launch {
             val devices = repo.list()
             _gate.update {
@@ -141,6 +152,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             pingAll(devices)
             _phase.value = Phase.Gate
         }
+    }
+
+    /** Gate 页手势返回：快速切换场景取消切换回主页 */
+    fun returnToMain() {
+        gateCameFromMain = false
+        _phase.value = Phase.Main
     }
 
     fun openForm(device: Device?) {
@@ -259,6 +276,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 if (_gate.value.editingId != null) repo.setCurrent(device.id)
                 _current.value = device
+                gateCameFromMain = false
                 _phase.value = Phase.Main
             } catch (e: CoreException) {
                 // 原始错误链只进 logcat（tag=wrtctrl），不上 UI——UI 只显示分类后的指引文案
