@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Lan
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -51,6 +52,7 @@ import java.io.File
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.wrtctrl.R
+import dev.wrtctrl.ui.screen.DashboardEditScreen
 import dev.wrtctrl.ui.screen.DeviceGateScreen
 import dev.wrtctrl.ui.screen.HomeScreen
 import dev.wrtctrl.ui.screen.LanguageAction
@@ -137,11 +139,22 @@ fun AppRoot() {
 @Composable
 private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
     var selected by remember { mutableIntStateOf(0) }
+    var showDashboardEdit by remember { mutableStateOf(false) }
+    val app = LocalContext.current.applicationContext as Application
+    val homeVm: HomeViewModel = viewModel(
+        factory = viewModelFactory { initializer { HomeViewModel(app) } }
+    )
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(TABS[selected].labelRes)) },
                 actions = {
+                    // 仪表盘卡片编辑入口（仅首页 Tab；全局入口惯例=顶栏右上角）
+                    if (selected == 0) {
+                        IconButton(onClick = { showDashboardEdit = true }) {
+                            Icon(Icons.Filled.Tune, contentDescription = stringResource(R.string.dashboard_edit_title))
+                        }
+                    }
                     // 设备切换入口（与门控页列表共用数据层，规格 B9）
                     IconButton(onClick = { vm.openDeviceList() }) {
                         Icon(Icons.Filled.Devices, contentDescription = stringResource(R.string.device_list_history_title))
@@ -166,12 +179,12 @@ private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
         Box(Modifier.padding(padding).fillMaxSize()) {
             when (selected) {
                 0 -> {
-                    val app = LocalContext.current.applicationContext as Application
-                    val homeVm: HomeViewModel = viewModel(
-                        factory = viewModelFactory { initializer { HomeViewModel(app) } }
-                    )
                     // 注意：Scaffold padding 已由外层 Box 消费，此处不可再叠加（双重空白的根因）
-                    HomeScreen(homeVm, Modifier.fillMaxSize())
+                    if (showDashboardEdit) {
+                        DashboardEditScreen(homeVm, onBack = { showDashboardEdit = false })
+                    } else {
+                        HomeScreen(homeVm, Modifier.fillMaxSize())
+                    }
                 }
                 else -> PlaceholderText(stringResource(TABS[selected].labelRes), Modifier.fillMaxSize())
             }

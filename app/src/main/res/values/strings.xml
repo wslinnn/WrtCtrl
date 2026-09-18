@@ -10,4 +10,7 @@
     <string name="language_follow_system">跟随系统</string>
     <string name="home_chart_collecting">正在积累数据…</string>
     <string name="debug_last_crash">上次崩溃</string>
+    <!-- 仪表盘卡片编辑（卡片名复用现有键） -->
+    <string name="dashboard_edit_title">编辑仪表盘</string>
+    <string name="dashboard_edit_hint">长按拖拽调整顺序，开关控制显示</string>
 </resources>

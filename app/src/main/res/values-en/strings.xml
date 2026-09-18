@@ -7,4 +7,7 @@
     <string name="debug_last_crash">Last crash</string>
     <string name="language_follow_system">Follow system</string>
     <string name="home_chart_collecting">Collecting data…</string>
+    <!-- Dashboard card editing (card names reuse existing keys) -->
+    <string name="dashboard_edit_title">Edit dashboard</string>
+    <string name="dashboard_edit_hint">Long-press and drag to reorder; toggle to show or hide</string>
 </resources>

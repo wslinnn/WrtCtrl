@@ -34,6 +34,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -70,7 +71,9 @@ import com.patrykandpatrick.vico.core.cartesian.layer.LineCartesianLayer
 import com.patrykandpatrick.vico.core.common.Fill
 import com.patrykandpatrick.vico.core.common.shader.LinearGradientShaderProvider
 import dev.wrtctrl.R
+import dev.wrtctrl.data.DashboardCardId
 import dev.wrtctrl.util.Format
+import dev.wrtctrl.viewmodel.HomeUiState
 import dev.wrtctrl.viewmodel.HomeViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -85,7 +88,7 @@ private const val TX_COLOR = 0xFF00C4CC
 private const val RX_AREA = 0x2E4FACFE
 private const val TX_AREA = 0x2800C4CC
 
-/** 首页仪表盘：系统状态 / 内存 / 实时带宽 / 网络状态 / 存储 */
+/** 首页仪表盘：卡片顺序/显隐由 DashboardPrefs 驱动（编辑页配置），折叠状态按卡片 id 记忆 */
 @Composable
 fun HomeScreen(vm: HomeViewModel, modifier: Modifier = Modifier) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -112,18 +115,22 @@ fun HomeScreen(vm: HomeViewModel, modifier: Modifier = Modifier) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        CollapsibleCard(stringResource(R.string.home_system_status)) {
-            InfoRow(stringResource(R.string.home_model), state.model)
-            InfoRow(stringResource(R.string.home_system_name), state.hostname)
-            InfoRow(stringResource(R.string.home_version_info), state.version)
-            InfoRow(stringResource(R.string.home_architecture), state.architecture)
-            InfoRow(stringResource(R.string.home_target_platform), state.target)
-            InfoRow(stringResource(R.string.home_uptime), state.uptime)
-            InfoRow(stringResource(R.string.home_cpu_load), state.load)
-            InfoRow(stringResource(R.string.home_temperature), state.temperature)
+        state.cardOrder.filter { it in state.cardEnabled }.forEach { cardId ->
+            key(cardId) {
+                DashboardCardBody(cardId, state)
+            }
         }
+    }
+}
 
-        CollapsibleCard(stringResource(R.string.home_resource_monitor), initiallyExpanded = true) {
+/** 单张仪表盘卡（按 id 分发；显隐与顺序由外层决定） */
+@Composable
+private fun DashboardCardBody(cardId: DashboardCardId, state: HomeUiState) {
+    when (cardId) {
+        DashboardCardId.RESOURCE -> CollapsibleCard(
+            stringResource(R.string.home_resource_monitor),
+            initiallyExpanded = true,
+        ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 RingColumn(
                     label = stringResource(R.string.home_memory),
@@ -139,7 +146,10 @@ fun HomeScreen(vm: HomeViewModel, modifier: Modifier = Modifier) {
             }
         }
 
-        CollapsibleCard(stringResource(R.string.statistics_bandwidth) + " · " + state.bandwidthSource.uppercase(), initiallyExpanded = true) {
+        DashboardCardId.BANDWIDTH -> CollapsibleCard(
+            stringResource(R.string.statistics_bandwidth) + " · " + state.bandwidthSource.uppercase(),
+            initiallyExpanded = true,
+        ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 RateBlock(label = "↓ RX", rate = state.rxRate, color = Color(RX_COLOR))
                 RateBlock(label = "↑ TX", rate = state.txRate, color = Color(TX_COLOR))
@@ -152,7 +162,18 @@ fun HomeScreen(vm: HomeViewModel, modifier: Modifier = Modifier) {
             )
         }
 
-        CollapsibleCard(stringResource(R.string.home_network_status)) {
+        DashboardCardId.SYSTEM -> CollapsibleCard(stringResource(R.string.home_system_status)) {
+            InfoRow(stringResource(R.string.home_model), state.model)
+            InfoRow(stringResource(R.string.home_system_name), state.hostname)
+            InfoRow(stringResource(R.string.home_version_info), state.version)
+            InfoRow(stringResource(R.string.home_architecture), state.architecture)
+            InfoRow(stringResource(R.string.home_target_platform), state.target)
+            InfoRow(stringResource(R.string.home_uptime), state.uptime)
+            InfoRow(stringResource(R.string.home_cpu_load), state.load)
+            InfoRow(stringResource(R.string.home_temperature), state.temperature)
+        }
+
+        DashboardCardId.NETWORK -> CollapsibleCard(stringResource(R.string.home_network_status)) {
             InfoRow(stringResource(R.string.home_wan_ip), state.wanIp)
             InfoRow(stringResource(R.string.home_lan_ip), state.lanIp)
             InfoRow(stringResource(R.string.home_gateway), state.gateway)
@@ -160,7 +181,7 @@ fun HomeScreen(vm: HomeViewModel, modifier: Modifier = Modifier) {
             InfoRow(stringResource(R.string.home_connections), state.connections)
         }
 
-        CollapsibleCard(stringResource(R.string.home_disk_status)) {
+        DashboardCardId.STORAGE -> CollapsibleCard(stringResource(R.string.home_disk_status)) {
             if (state.mounts.isEmpty()) {
                 Text(
                     "--",

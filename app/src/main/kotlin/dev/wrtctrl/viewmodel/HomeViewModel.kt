@@ -4,6 +4,9 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.wrtctrl.bridge.WrtCore
+import dev.wrtctrl.data.DashboardCardId
+import dev.wrtctrl.data.DashboardConfig
+import dev.wrtctrl.data.DashboardPrefs
 import dev.wrtctrl.util.Format
 import dev.wrtctrl.util.Format.bandwidthRates
 import dev.wrtctrl.util.formatBytes
@@ -59,6 +62,9 @@ data class HomeUiState(
     val txSeries: List<Double> = emptyList(),
     val timestamps: List<Long> = emptyList(),
     val bandwidthSource: String = "lan",
+    // 卡片自定义
+    val cardOrder: List<DashboardCardId> = DashboardPrefs.DEFAULT.order,
+    val cardEnabled: Set<DashboardCardId> = DashboardPrefs.DEFAULT.enabled,
 )
 
 /**
@@ -71,6 +77,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     val state: StateFlow<HomeUiState> = _state
 
     private var bandwidthDevice: String? = null
+    private val dashboardPrefs = DashboardPrefs(application)
 
     init {
         viewModelScope.launch {
@@ -80,6 +87,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 pollOnce()
             }
         }
+        viewModelScope.launch {
+            dashboardPrefs.configFlow().collect { config ->
+                _state.update { it.copy(cardOrder = config.order, cardEnabled = config.enabled) }
+            }
+        }
+    }
+
+    /** 编辑页即时保存（顺序 + 显隐） */
+    fun saveCardConfig(order: List<DashboardCardId>, enabled: Set<DashboardCardId>) {
+        viewModelScope.launch { dashboardPrefs.save(DashboardConfig(order, enabled)) }
     }
 
     private suspend fun pollOnce() {
