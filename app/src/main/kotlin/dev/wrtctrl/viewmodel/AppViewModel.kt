@@ -15,6 +15,7 @@ import dev.wrtctrl.data.DeviceRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -162,16 +163,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _phase.value = Phase.Main
     }
 
-    /** 列表下拉刷新：重读设备 + 重跑并行探活（pings 清空回到"检测中"态）；不动 phase 与快速切换标记 */
+    /** 列表下拉刷新：重读设备 + 重跑并行探活（pings 清空回到"检测中"态）；不动 phase 与快速切换标记。
+     *  指示器最短展示 400ms：repo.list() 毫秒级完成，isRefreshing true→false 切换过快会让
+     *  M3 PullToRefreshBox 指示器停在外面不回弹（首页拉取走网络耗时长故无此现象）。 */
     fun refreshDeviceList() {
         if (_gate.value.refreshing) return
         viewModelScope.launch {
             _gate.update { it.copy(refreshing = true) }
             val devices = repo.list()
             _gate.update {
-                it.copy(refreshing = false, devices = devices, pings = emptyMap(), bannerError = null)
+                it.copy(devices = devices, pings = emptyMap(), bannerError = null)
             }
             pingAll(devices)
+            delay(400)
+            _gate.update { it.copy(refreshing = false) }
         }
     }
 

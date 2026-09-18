@@ -155,13 +155,12 @@ private fun DashboardCardBody(
     val expanded = cardId !in state.collapsed
     when (cardId) {
         DashboardCardId.RESOURCE -> {
-            val disk = state.mounts.firstOrNull { it.mount == "/overlay" } ?: state.mounts.firstOrNull()
             CollapsibleCard(
                 title = stringResource(R.string.home_resource_monitor),
                 expanded = expanded,
                 onToggle = { onToggle(cardId) },
-                summary = stringResource(R.string.home_memory) + " ${state.memoryPercent}% · " +
-                    stringResource(R.string.home_overlay) + " ${disk?.usagePercent ?: 0}%",
+                summary = stringResource(R.string.home_cpu) + " " + (state.cpuPercent?.let { "$it%" } ?: "--") +
+                    " · " + stringResource(R.string.home_memory) + " ${state.memoryPercent}%",
             ) {
                 ResourceRings(state)
             }
@@ -333,35 +332,22 @@ private fun RateBlock(label: String, rate: Long, color: Color) {
     }
 }
 
-/** 资源监控环组：算力对（CPU/温度）→ 容量对（内存/磁盘），2×2 网格、104dp 大环——
- *  一行四环在部分屏宽下环距归零且明细文字换行错位（已否决）；数据不可得的环整格移除，余环自动聚拢。 */
+/** 资源监控环组：CPU → 内存 → 温度 一行三环。磁盘不入环组：与存储信息卡重复，
+ *  由其卡头摘要（overlay %）+ 挂载点明细承担；数据不可得的环整环移除，余环 SpaceEvenly 聚拢。 */
 @Composable
 private fun ResourceRings(state: HomeUiState) {
-    val disk = state.mounts.firstOrNull { it.mount == "/overlay" } ?: state.mounts.firstOrNull()
     val specs = buildList {
         state.cpuPercent?.let { add(RingSpec(stringResource(R.string.home_cpu), it, "$it%", state.load)) }
+        add(RingSpec(stringResource(R.string.home_memory), state.memoryPercent, null, state.memoryDetail))
         state.tempC?.let { temp ->
             // 环弧映射：40℃=空，90℃=满（路由器结温健康区间），中心显示实际读数
             val percent = (((temp - 40) / 50.0) * 100).roundToInt().coerceIn(0, 100)
             add(RingSpec(stringResource(R.string.home_temperature), percent, "$temp℃", null))
         }
-        add(RingSpec(stringResource(R.string.home_memory), state.memoryPercent, null, state.memoryDetail))
-        add(
-            RingSpec(
-                stringResource(R.string.home_overlay),
-                disk?.usagePercent ?: 0,
-                null,
-                disk?.detail,
-            ),
-        )
     }
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        specs.chunked(2).forEach { rowSpecs ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                rowSpecs.forEach { spec ->
-                    RingColumn(spec.label, spec.percent, spec.centerText, spec.detail, 104.dp)
-                }
-            }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+        specs.forEach { spec ->
+            RingColumn(spec.label, spec.percent, spec.centerText, spec.detail, 104.dp)
         }
     }
 }
