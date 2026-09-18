@@ -18,11 +18,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
@@ -347,7 +349,8 @@ private fun ResourceRings(state: HomeUiState) {
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
         specs.forEach { spec ->
-            RingColumn(spec.label, spec.percent, spec.centerText, spec.detail, 104.dp)
+            // 96dp：3 环 × 96 = 288dp，360dp 手机内容区（约 296dp）内不触发 Row 挤压
+            RingColumn(spec.label, spec.percent, spec.centerText, spec.detail, 96.dp)
         }
     }
 }
@@ -374,7 +377,8 @@ private fun UsageBar(percent: Int, modifier: Modifier = Modifier) {
 }
 
 /** 环形进度：渐变弧 + 圆头端帽 + 进度动画；环中心「标签 + 读数」（centerText 缺省为百分比）。
- *  弧线绘制矩形向内缩半个描边：描边以画布边界为中心线会外溢半宽，是展开时压到卡头的重叠根因。 */
+ *  弧线绘制矩形向内缩半个描边（描边以画布边界为中心线会外溢半宽，是展开时压到卡头的重叠根因）；
+ *  并按画布短边画正圆居中——画布一旦被压缩成矩形（Row 宽度不足挤压），圆也不会变椭圆。 */
 @Composable
 private fun Ring(
     label: String,
@@ -393,15 +397,15 @@ private fun Ring(
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val stroke = size.minDimension * 0.11f
-            val arcSize = Size(size.width - stroke, size.height - stroke)
-            val topLeft = Offset(stroke / 2f, stroke / 2f)
+            val d = minOf(size.width, size.height) - stroke
+            val topLeft = Offset((size.width - d) / 2f, (size.height - d) / 2f)
             drawArc(
                 color = track,
                 startAngle = -90f,
                 sweepAngle = 360f,
                 useCenter = false,
                 topLeft = topLeft,
-                size = arcSize,
+                size = Size(d, d),
                 style = Stroke(stroke, cap = StrokeCap.Round),
             )
             drawArc(
@@ -410,7 +414,7 @@ private fun Ring(
                 sweepAngle = 360f * animated.coerceIn(0f, 1f),
                 useCenter = false,
                 topLeft = topLeft,
-                size = arcSize,
+                size = Size(d, d),
                 style = Stroke(stroke, cap = StrokeCap.Round),
             )
         }
@@ -430,7 +434,9 @@ private fun Ring(
     }
 }
 
-/** 资源监控环单元：环 + 环下明细（内存/磁盘=used/total，CPU=负载均值；空明细不占位） */
+/** 资源监控环单元：环 + 环下明细（内存=used/total，CPU=负载均值；空明细不占位）。
+ *  列宽锁定为环径：明细文字在固定宽度内换行，不撑宽列——否则 Row 宽度不足时
+ *  会挤压末位环的水平约束，环被压成椭圆（实测复现）。 */
 @Composable
 private fun RingColumn(
     label: String,
@@ -439,12 +445,15 @@ private fun RingColumn(
     detail: String?,
     ringSize: Dp,
 ) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        Modifier.width(ringSize),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Ring(
             label = label,
             percent = percent,
             centerText = centerText,
-            modifier = Modifier.size(ringSize),
+            modifier = Modifier.fillMaxWidth().aspectRatio(1f),
             compact = ringSize < 100.dp,
         )
         if (!detail.isNullOrBlank()) {
