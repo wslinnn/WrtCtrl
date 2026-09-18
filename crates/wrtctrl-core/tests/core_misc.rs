@@ -7,7 +7,7 @@ use serde_json::json;
 use wiremock::{Mock, MockServer};
 use wrtctrl_core::diag::NSLOOKUP_TIMEOUT;
 use wrtctrl_core::error::UbusError;
-use wrtctrl_core::rpc::{DeviceSession, RouterClient};
+use wrtctrl_core::rpc::RouterClient;
 use wrtctrl_core::syslog::LogLevel;
 use wrtctrl_core::{ping_level, PingLevel};
 
@@ -291,13 +291,14 @@ async fn kick_client_params() {
     );
 }
 
-// ── ping 探测 ──
+// ── ping 探测（ICMP 优先 + HTTP HEAD 兜底，见 ping.rs）──
 
-/// 契约：HTTP GET 根 URL 探活返回毫秒数；分档边界 <100/<300
+/// 契约：对可达目标返回毫秒数（桌面无 /system/bin/ping，实际走 HTTP 兜底；ICMP 路径由集成验收覆盖）；
+/// 分档边界 <100/<300 见 ping.rs 内嵌单测
 #[tokio::test]
 async fn ping_device_probes_base_url() {
     let server = MockServer::start().await;
-    Mock::given(wiremock::matchers::method("GET"))
+    Mock::given(wiremock::matchers::method("HEAD"))
         .respond_with(ok_response(json!({})))
         .mount(&server)
         .await;
@@ -313,7 +314,7 @@ async fn ping_device_probes_base_url() {
 #[tokio::test]
 async fn ping_url_probes_arbitrary_device() {
     let server = MockServer::start().await;
-    Mock::given(wiremock::matchers::method("GET"))
+    Mock::given(wiremock::matchers::method("HEAD"))
         .respond_with(ok_response(json!({})))
         .mount(&server)
         .await;
@@ -323,21 +324,9 @@ async fn ping_url_probes_arbitrary_device() {
     assert!(ms.is_some());
 }
 
-/// 契约：离线（连不通）→ None
+/// 契约：ICMP 不可达（TEST-NET 保留网段）且 HTTP 兜底不通 → None
 #[tokio::test]
-async fn ping_device_offline_returns_none() {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
-
+async fn ping_unreachable_host_returns_none() {
     let client = RouterClient::new(true);
-    client
-        .set_session(Some(DeviceSession {
-            base_url: format!("http://127.0.0.1:{port}"),
-            session: Some("s".into()),
-            username: "root".into(),
-            password: "pw".into(),
-        }))
-        .await;
-    assert!(client.ping_device().await.is_none());
+    assert!(client.ping_url("http://203.0.113.1/").await.is_none());
 }

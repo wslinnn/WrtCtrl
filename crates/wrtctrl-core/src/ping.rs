@@ -1,7 +1,8 @@
-//! ping.rs — 设备 HTTP 探活（对应旧 DeviceManager.pingDevice/pingLevel）。
+//! ping.rs — 设备探活（对应旧 DeviceManager.pingDevice/pingLevel）。
 //!
-//! 轻量 GET 路由器根 URL（自签证书由 RouterClient 的 rustls 配置统一处理），
-//! 返回往返毫秒；失败/超时 None。5s 超时。
+//! 优先 ICMP（/system/bin/ping，rtt 真实）；实测表明部分 ROM
+//! 限制 app 执行该二进制（路径/cap_net_raw/SELinux），故 ICMP 失败回落 HTTP HEAD
+//! （收到任意响应即可达，数值含握手开销偏大，仅作保底）。
 
 use crate::rpc::RouterClient;
 use serde::Serialize;
@@ -30,9 +31,7 @@ pub fn ping_level(ms: u64) -> PingLevel {
 }
 
 impl RouterClient {
-    /// 探活任意设备根 URL（设备列表页并行 ping 多台用）。
-    /// 原生化升级：优先 ICMP（Android 自带 /system/bin/ping，无需 root，rtt 更真实），
-    /// 失败回落 HTTP HEAD（收到任意响应即可达，不检查状态码）。
+    /// 探活任意设备根 URL（设备列表页并行 ping 多台用）
     pub async fn ping_url(&self, base_url: &str) -> Option<u64> {
         if let Some(host) = host_of(base_url) {
             if let Some(ms) = icmp_ping(&host).await {
@@ -65,12 +64,13 @@ fn host_of(base_url: &str) -> Option<String> {
     (!host.is_empty()).then(|| host.to_string())
 }
 
-/// ICMP 探活：/system/bin/ping -c1 -W2（阻塞执行放 spawn_blocking，rtt 从输出解析）
+/// ICMP 探活：ping -c1 -W2（阻塞执行放 spawn_blocking，rtt 从输出解析）。
+/// 不写死绝对路径、按 PATH 解析：部分 ROM 的 ping 不在 /system/bin（写死会导致恒失败）。
 async fn icmp_ping(host: &str) -> Option<u64> {
     let host = host.to_string();
     let start = Instant::now();
     let output = tokio::task::spawn_blocking(move || {
-        Command::new("/system/bin/ping")
+        Command::new("ping")
             .args(["-c", "1", "-W", "2", &host])
             .output()
             .ok()
@@ -110,5 +110,14 @@ mod tests {
         assert_eq!(ping_level(299), PingLevel::Ok);
         assert_eq!(ping_level(300), PingLevel::Slow);
         assert_eq!(ping_level(5000), PingLevel::Slow);
+    }
+
+    #[test]
+    fn host_extraction() {
+        assert_eq!(host_of("http://192.168.1.1/"), Some("192.168.1.1".into()));
+        assert_eq!(host_of("https://192.168.1.1:8443/cgi"), Some("192.168.1.1".into()));
+        assert_eq!(host_of("http://[fd00::1]:8080/"), Some("fd00::1".into()));
+        assert_eq!(host_of("192.168.1.1"), Some("192.168.1.1".into()));
+        assert_eq!(host_of("http:///path"), None);
     }
 }

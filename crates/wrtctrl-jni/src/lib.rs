@@ -207,7 +207,7 @@ pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_helloNative(
 /// panic 演练：返回 "caught panic: ..." = 防线生效；进程死掉 = 防线失效
 #[no_mangle]
 pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_panicTestNative(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _class: JClass,
 ) -> jstring {
     init_panic_hook();
