@@ -57,6 +57,8 @@ data class HomeUiState(
     val txRate: Long = 0,
     val rxSeries: List<Double> = emptyList(),
     val txSeries: List<Double> = emptyList(),
+    val timestamps: List<Long> = emptyList(),
+    val bandwidthSource: String = "lan",
 )
 
 /**
@@ -132,10 +134,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         val target = wanDevice ?: "br-lan"
+        val source = if (wanDevice != null) "wan" else "lan"
         if (target != bandwidthDevice) {
             // 目标切换（wan↔br-lan）时清空序列，避免混入旧设备的差分
             bandwidthDevice = target
-            _state.update { it.copy(rxSeries = emptyList(), txSeries = emptyList(), rxRate = 0, txRate = 0) }
+            _state.update {
+                it.copy(
+                    rxSeries = emptyList(),
+                    txSeries = emptyList(),
+                    timestamps = emptyList(),
+                    rxRate = 0,
+                    txRate = 0,
+                    bandwidthSource = source,
+                )
+            }
         }
         val payload = try {
             withContext(Dispatchers.IO) {
@@ -147,17 +159,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val samples = payload.optJSONArray("result") ?: return
         val series = bandwidthRates(samples)
         if (series.timestamps.isEmpty()) return
-        var rx = series.rx; var tx = series.tx
+        var rx = series.rx; var tx = series.tx; var ts = series.timestamps
         if (rx.size > 60) {
             rx = rx.takeLast(60).toMutableList()
             tx = tx.takeLast(60).toMutableList()
+            ts = ts.takeLast(60).toMutableList()
         }
         _state.update {
             it.copy(
                 rxSeries = rx.toList(),
                 txSeries = tx.toList(),
+                timestamps = ts.toList(),
                 rxRate = rx.last().roundToLong(),
                 txRate = tx.last().roundToLong(),
+                bandwidthSource = source,
             )
         }
     }
