@@ -106,8 +106,12 @@ fun AppRoot() {
                     containerColor = MaterialTheme.colorScheme.errorContainer,
                 ),
             ) {
-                Column(Modifier.padding(12.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.padding(12.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
                         Text(
                             stringResource(R.string.debug_last_crash),
                             style = MaterialTheme.typography.titleSmall,

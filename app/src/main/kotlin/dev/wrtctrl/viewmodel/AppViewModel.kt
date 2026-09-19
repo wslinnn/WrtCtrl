@@ -251,35 +251,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** 表单提交：字段校验 → 登录（密码仅限长度；备注可选）→ 落库进主界面 */
     fun submit() {
         val form = _gate.value.form
-        val errors = mutableMapOf<String, Int>()
-        if (form.host.isBlank()) {
-            errors["host"] = R.string.device_list_host_required
-        } else if (!isHostValid(form.host)) {
-            errors["host"] = R.string.device_list_host_format_error
-        }
-        val port = form.port.toIntOrNull()
-        if (form.port.isBlank()) {
-            errors["port"] = R.string.device_list_port_required
-        } else if (port == null || port !in 1..65535) {
-            errors["port"] = R.string.device_list_port_range_error
-        }
-        if (form.username.isBlank()) {
-            errors["username"] = R.string.device_list_username_required
-        } else if (!USERNAME_CHARS.matches(form.username)) {
-            errors["username"] = R.string.device_list_username_format_error
-        }
-        // B7：密码只限长度，空格/任意符号合法（旧字符白名单是会拒绝合法密码的 bug）
-        if (form.password.length > 64) {
-            errors["password"] = R.string.device_list_password_length_error
-        }
-        if (form.name.length > 64) {
-            errors["name"] = R.string.device_list_remark_length_error
-        }
+        val errors = validateForm(form)
         if (errors.isNotEmpty()) {
             _gate.update { it.copy(fieldErrors = errors) }
             return
         }
-        val checkedPort = port ?: 80
+        // 走到这里校验必已通过：端口非空且在 1..65535
+        val checkedPort = form.port.toIntOrNull() ?: 80
         _gate.update {
             it.copy(fieldErrors = emptyMap(), connecting = true, formErrorText = null, formErrorCode = null)
         }
@@ -345,19 +323,49 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         val USERNAME_CHARS = Regex("^[a-zA-Z0-9._\\-@]+$")
 
+        /** 字段校验（密码只限长度，空格/任意符号合法——旧字符白名单会拒绝合法密码）→ 字段名到错误文案 */
+        fun validateForm(form: FormState): Map<String, Int> {
+            val errors = mutableMapOf<String, Int>()
+            if (form.host.isBlank()) {
+                errors["host"] = R.string.device_list_host_required
+            } else if (!isHostValid(form.host)) {
+                errors["host"] = R.string.device_list_host_format_error
+            }
+            val port = form.port.toIntOrNull()
+            if (form.port.isBlank()) {
+                errors["port"] = R.string.device_list_port_required
+            } else if (port == null || port !in 1..65535) {
+                errors["port"] = R.string.device_list_port_range_error
+            }
+            if (form.username.isBlank()) {
+                errors["username"] = R.string.device_list_username_required
+            } else if (!USERNAME_CHARS.matches(form.username)) {
+                errors["username"] = R.string.device_list_username_format_error
+            }
+            if (form.password.length > 64) {
+                errors["password"] = R.string.device_list_password_length_error
+            }
+            if (form.name.length > 64) {
+                errors["name"] = R.string.device_list_remark_length_error
+            }
+            return errors
+        }
+
         /** ASCII 集合 + 无连续/首尾点横线 + IPv4 段 ≤255 */
         fun isHostValid(raw: String): Boolean {
             val s = raw.trim()
             if (s.isEmpty() || s.length > 64) return false
-            if (!s.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it in "._:%-" }) return false
-            if (!s.any { it.isDigit() || it in 'a'..'z' || it in 'A'..'Z' }) return false
+            if (!s.all(::isHostChar)) return false
+            if (!s.any(Char::isLetterOrDigit)) return false
             if (s.contains("..") || s.contains("--")) return false
-            if (s.first() == '.' || s.first() == '-' || s.last() == '.' || s.last() == '-') return false
+            if (s.first() in ".-" || s.last() in ".-") return false
             val octets = s.split('.')
             if (octets.size == 4 && octets.all { o -> o.isNotEmpty() && o.all(Char::isDigit) }) {
                 return octets.all { it.toIntOrNull() in 0..255 }
             }
             return true
         }
+
+        private fun isHostChar(c: Char) = c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' || c in "._:%-"
     }
 }

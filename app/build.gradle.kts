@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.detekt)
 }
 
 // Rust 构建需要定位 SDK/NDK：优先 ANDROID_HOME 环境变量，其次 local.properties 的 sdk.dir
@@ -71,6 +72,12 @@ android {
         disable += "Instantiatable"
     }
 
+    detekt {
+        // 规则基线在仓库内 config/detekt/detekt.yml，放宽项均带理由注释
+        buildUponDefaultConfig = true
+        config.setFrom(files("${rootDir}/config/detekt/detekt.yml"))
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -122,6 +129,7 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
 
     testImplementation(libs.junit)
+    testImplementation(libs.org.json)
 }
 
 tasks.withType<Test>().configureEach {

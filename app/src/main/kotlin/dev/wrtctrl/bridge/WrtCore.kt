@@ -22,6 +22,9 @@ class CoreException(
  * Dispatchers.IO 调用——当前全部为对答式调用，无推送场景，不引入 reqId 回调机制。
  * 统一应答信封：{"ok":true,"data":…} / {"ok":false,"error":{code,message,ubus?}}。
  */
+// TooManyFunctions：本对象是原生导出的一比一门面（每个 JNI 导出一个 suspend 包装），
+// 函数数由 core 能力面决定，拆分只会制造间接层
+@Suppress("TooManyFunctions")
 object WrtCore {
     init {
         System.loadLibrary("wrtctrl_jni")

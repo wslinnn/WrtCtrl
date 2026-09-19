@@ -18,7 +18,10 @@ data class Device(
 ) {
     /** 地址显示：默认端口省略（备注为空时用它做显示名） */
     val displayAddress: String
-        get() = if ((!useHttps && port == 80) || (useHttps && port == 443)) host else "$host:$port"
+        get() {
+            val defaultPort = if (useHttps) 443 else 80
+            return if (port == defaultPort) host else "$host:$port"
+        }
 
     val displayName: String get() = name.ifBlank { displayAddress }
 

@@ -1,0 +1,51 @@
+# WrtCtrl detekt 基线：默认规则集 + 本项目放宽项（每项放宽都写明理由）。
+# 运行: ./gradlew detekt ；随 check 任务联动。新增放宽必须先在此注释理由。
+
+build:
+  # 违规即失败：新问题不允许积累，需要豁免就改这里或修代码
+  maxIssues: 0
+
+complexity:
+  LongMethod:
+    # 图表/表单类组合函数天然偏长（BandwidthChart ~120 行含绘制与浮层）
+    threshold: 150
+  CyclomaticComplexMethod:
+    threshold: 20
+  LongParameterList:
+    active: false
+    # Composable 参数列表天然偏长（label/percent/onToggle…），detekt 无 Compose 语义
+  TooManyFunctions:
+    thresholdInClasses: 16
+    thresholdInObjects: 16
+    # 状态机 VM（AppViewModel 14 个用例函数）与解析器对象（HomeParsers 14 个纯函数）
+    # 函数数天然偏多；拆分反而割裂内聚
+
+exceptions:
+  TooGenericExceptionCaught:
+    active: false
+    # 「兜底 catch + 业务降级（保留旧值/空态）」是本项目既定错误处理模式；
+    # CancellationException 的 rethrow 已由代码评审与单测保障
+  SwallowedException:
+    active: false
+    # 同上：静默降级均伴随 logcat(tag=wrtctrl) 或行内注释说明
+
+naming:
+  FunctionNaming:
+    # @Composable 函数为帕斯卡命名（Compose 惯例），不适用驼峰函数名规则
+    ignoreAnnotated: ['Composable']
+  TopLevelPropertyNaming:
+    active: false
+    # private val RX_COLOR 等常量用 SCREAMING_SNAKE，detekt 默认按驼峰检查顶层属性
+
+style:
+  MagicNumber:
+    active: false
+    # UI 尺寸/颜色字面量遍布 Compose（dp/色值），抽常量收益低、噪音高
+  MaxLineLength:
+    maxLineLength: 140
+  ReturnCount:
+    max: 8
+    # guard-clause 提前返回优先于嵌套（Kotlin 惯例），解析器/校验器多 return 是刻意风格
+  LoopWithTooManyJumpStatements:
+    maxJumpCount: 3
+    # 采样/字段遍历的容错跳过（字段缺失/类型不符即 continue）是解析循环的自然形态

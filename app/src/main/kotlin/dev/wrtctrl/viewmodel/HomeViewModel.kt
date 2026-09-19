@@ -9,9 +9,9 @@ import dev.wrtctrl.data.DashboardConfig
 import dev.wrtctrl.data.DashboardPrefs
 import dev.wrtctrl.util.Format
 import dev.wrtctrl.util.Format.bandwidthRates
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -19,20 +19,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
-import kotlin.math.roundToInt
-import kotlin.math.roundToLong
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Dispatchers
-import org.json.JSONArray
 import org.json.JSONObject
-
-data class MountInfo(
-    val device: String,
-    val mount: String,
-    val usagePercent: Int,
-    val detail: String,
-)
+import kotlin.math.roundToLong
 
 data class HomeUiState(
     val loading: Boolean = true,
@@ -50,7 +40,7 @@ data class HomeUiState(
     // 内存
     val memoryPercent: Int = 0,
     val memoryDetail: String = "--",
-    // 网络状态卡
+    // 网络信息卡
     val wanIp: String = "--",
     val lanIp: String = "--",
     val gateway: String = "--",
@@ -78,6 +68,8 @@ data class HomeUiState(
  * getTempInfo / getMountPoints / getCPUUsage）+ 带宽差分（getRealtimeStats）。
  * getCPUUsage 为 部分回退（CPU 环需求，见 ；轮询绑定本 ViewModel
  * 生命周期：离开主界面自动停止（行为偏差表 B1 修复的延伸）。
+ * 带宽目标 = wan 优先（l3_device），无 wan 回落 br-lan（旧 getQuickBandwidthTarget）。
+ * 解析逻辑全部在 HomeParsers（纯函数，JVM 单测覆盖）。
  */
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(HomeUiState())
@@ -135,7 +127,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun pollOnce() {
-        val (board, info, connCount, connMax, ifaceDump, temp, mounts, cpu) = coroutineScope {
+        val poll = coroutineScope {
             val board = async { ubusSafe("system", "board") }
             val info = async { ubusSafe("system", "info") }
             val connCount = async { readSafe("/proc/sys/net/netfilter/nf_conntrack_count") }
@@ -153,28 +145,28 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { state ->
             state.copy(
                 loading = false,
-                model = board?.model() ?: state.model,
-                hostname = board?.optString("hostname", state.hostname) ?: state.hostname,
-                version = board?.versionString() ?: state.version,
-                architecture = board?.optString("system", state.architecture) ?: state.architecture,
-                target = board?.optJSONObject("release")?.optString("target", state.target) ?: state.target,
-                uptime = info?.optLong("uptime")?.let(Format::duration) ?: state.uptime,
-                load = info?.loadString() ?: state.load,
-                cpuPercent = cpu?.cpuPercent() ?: state.cpuPercent,
-                tempC = temp?.tempC() ?: state.tempC,
-                memoryPercent = info?.memoryPercent() ?: state.memoryPercent,
-                memoryDetail = info?.memoryDetail() ?: state.memoryDetail,
-                connections = connectionsText(connCount, connMax) ?: state.connections,
-                wanIp = ifaceDump?.wanIp() ?: state.wanIp,
-                lanIp = ifaceDump?.lanIp() ?: state.lanIp,
-                gateway = ifaceDump?.gateway() ?: state.gateway,
-                dns = ifaceDump?.dns() ?: state.dns,
-                mounts = mounts?.mountList() ?: state.mounts,
+                model = poll.board?.let(HomeParsers::model) ?: state.model,
+                hostname = poll.board?.optString("hostname", state.hostname) ?: state.hostname,
+                version = poll.board?.let(HomeParsers::versionString) ?: state.version,
+                architecture = poll.board?.optString("system", state.architecture) ?: state.architecture,
+                target = poll.board?.optJSONObject("release")?.optString("target", state.target) ?: state.target,
+                uptime = poll.info?.optLong("uptime")?.let(Format::duration) ?: state.uptime,
+                load = poll.info?.let(HomeParsers::load) ?: state.load,
+                cpuPercent = poll.cpu?.let(HomeParsers::cpuPercent) ?: state.cpuPercent,
+                tempC = poll.temp?.let(HomeParsers::tempC) ?: state.tempC,
+                memoryPercent = poll.info?.let(HomeParsers::memoryPercent) ?: state.memoryPercent,
+                memoryDetail = poll.info?.let(HomeParsers::memoryDetail) ?: state.memoryDetail,
+                connections = HomeParsers.connectionsText(poll.connCount, poll.connMax) ?: state.connections,
+                wanIp = poll.ifaceDump?.let(HomeParsers::wanIp) ?: state.wanIp,
+                lanIp = poll.ifaceDump?.let(HomeParsers::lanIp) ?: state.lanIp,
+                gateway = poll.ifaceDump?.let(HomeParsers::gateway) ?: state.gateway,
+                dns = poll.ifaceDump?.let(HomeParsers::dns) ?: state.dns,
+                mounts = poll.mounts?.let(HomeParsers::mountList) ?: state.mounts,
             )
         }
 
         // 带宽依赖 iface dump 的目标设备
-        ifaceDump?.let { fetchBandwidth(it) }
+        poll.ifaceDump?.let { fetchBandwidth(it) }
     }
 
     private suspend fun fetchBandwidth(ifaceDump: JSONObject) {
@@ -260,130 +252,4 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val mounts: JSONObject?,
         val cpu: JSONObject?,
     )
-
-    private fun JSONObject.model(): String {
-        val distribution = optJSONObject("release")?.optString("distribution", "OpenWrt")?.ifBlank { "OpenWrt" } ?: "OpenWrt"
-        return optString("model").ifBlank { distribution }
-    }
-
-    private fun JSONObject.versionString(): String {
-        val release = optJSONObject("release")
-        val distribution = release?.optString("distribution", "OpenWrt")?.ifBlank { "OpenWrt" } ?: "OpenWrt"
-        val version = release?.optString("version") ?: ""
-        val kernel = optString("kernel")
-        val base = if (version.isNotBlank()) "$distribution $version($kernel)" else "$distribution ($kernel)"
-        return base.ifBlank { "--" }
-    }
-
-    private fun JSONObject.loadString(): String? {
-        val arr = optJSONArray("load") ?: return null
-        if (arr.length() < 3) return null
-        return (0 until 3).joinToString(" ") { String.format(java.util.Locale.US, "%.2f", arr.optDouble(it) / 65536.0) }
-    }
-
-    /** CPU 使用率（%）。数据源 = luci getCPUUsage 的 cpuusage 字段——部分回退：
-     *  原字段因无人展示按死代码砍除，现 CPU 环有真实需求复活为活调用；
-     *  多分支格式兼容不保留，只走单条解析路径，失败返回 null 隐藏环。 */
-    private fun JSONObject.cpuPercent(): Int? {
-        val raw = opt("cpuusage")?.toString() ?: return null
-        val m = Regex("([0-9]+(?:\\.[0-9]+)?)").find(raw) ?: return null
-        var v = m.groupValues[1].toDoubleOrNull() ?: return null
-        if (v <= 1.0) v *= 100.0
-        return v.coerceIn(0.0, 100.0).roundToInt()
-    }
-
-    /** 温度（℃）。取 tempinfo 首个数字；无传感器/为 0 → null，调用方隐藏温度环 */
-    private fun JSONObject.tempC(): Int? {
-        val raw = opt("tempinfo")?.toString() ?: return null
-        val m = Regex("([0-9]+(?:\\.[0-9]+)?)").find(raw) ?: return null
-        val v = m.groupValues[1].toDoubleOrNull() ?: return null
-        if (v <= 0.0) return null
-        return v.roundToInt()
-    }
-
-    private fun JSONObject.memoryPercent(): Int {
-        val memory = optJSONObject("memory") ?: return 0
-        val total = memory.optLong("total")
-        if (total <= 0) return 0
-        val used = total - memory.optLong("available")
-        return (used.toDouble() / total * 100).roundToLong().toInt().coerceIn(0, 100)
-    }
-
-    private fun JSONObject.memoryDetail(): String {
-        val memory = optJSONObject("memory") ?: return "--"
-        val total = memory.optLong("total")
-        val used = total - memory.optLong("available")
-        return "${Format.bytes(used)} / ${Format.bytes(total)}"
-    }
-
-    private fun connectionsText(count: String?, max: String?): String? {
-        val current = count?.trim()?.toIntOrNull() ?: return null
-        val maxV = max?.trim()?.toIntOrNull() ?: 0
-        return "$current / $maxV"
-    }
-
-    private fun JSONObject.wanIp(): String? = ipOf("wan")
-    private fun JSONObject.lanIp(): String? = ipOf("lan")
-
-    private fun JSONObject.ipOf(name: String): String? {
-        val interfaces = optJSONArray("interface") ?: return null
-        for (i in 0 until interfaces.length()) {
-            val entry = interfaces.optJSONObject(i) ?: continue
-            if (entry.optString("interface") == name) {
-                val v4 = entry.optJSONArray("ipv4-address")?.optJSONObject(0) ?: return null
-                val address = v4.optString("address")
-                if (address.isBlank()) return null
-                return "$address/${v4.optInt("mask")}"
-            }
-        }
-        return null
-    }
-
-    private fun JSONObject.gateway(): String? {
-        val interfaces = optJSONArray("interface") ?: return null
-        for (i in 0 until interfaces.length()) {
-            val entry = interfaces.optJSONObject(i) ?: continue
-            if (entry.optString("interface") != "wan") continue
-            val routes = entry.optJSONArray("route") ?: continue
-            for (r in 0 until routes.length()) {
-                val route = routes.optJSONObject(r) ?: continue
-                if (route.optString("target") == "0.0.0.0" && route.optInt("mask") == 0) {
-                    return route.optString("nexthop")
-                }
-            }
-        }
-        return null
-    }
-
-    private fun JSONObject.dns(): String? {
-        val interfaces = optJSONArray("interface") ?: return null
-        for (i in 0 until interfaces.length()) {
-            val entry = interfaces.optJSONObject(i) ?: continue
-            if (entry.optString("interface") != "wan") continue
-            val servers = entry.optJSONArray("dns-server") ?: continue
-            val parts = (0 until minOf(servers.length(), 2)).mapNotNull { servers.optString(it).takeIf(String::isNotBlank) }
-            if (parts.isNotEmpty()) return parts.joinToString(", ")
-        }
-        return null
-    }
-
-    private fun JSONObject.mountList(): List<MountInfo> {
-        val result = optJSONArray("result") ?: return emptyList()
-        val list = (0 until result.length()).mapNotNull { m ->
-            val entry = result.optJSONObject(m) ?: return@mapNotNull null
-            val total = entry.optLong("size")
-            val free = entry.optLong("free")
-            val used = total - free
-            val percent = if (total > 0) (used.toDouble() / total * 100).roundToLong().toInt().coerceIn(0, 100) else 0
-            MountInfo(
-                device = entry.optString("device", "--").ifBlank { "--" },
-                mount = entry.optString("mount", "--").ifBlank { "--" },
-                usagePercent = percent,
-                detail = "${Format.bytes(used)} / ${Format.bytes(total)}",
-            )
-        }
-        return list
-            .filter { it.mount != "/" && it.mount != "/dev" }
-            .sortedBy { when (it.mount) { "/overlay" -> 0; "/tmp" -> 1; else -> 2 } }
-    }
 }
