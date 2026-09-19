@@ -2,7 +2,7 @@ import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
+    // AGP 9 内置 Kotlin：不再 apply org.jetbrains.kotlin.android；Kotlin 版本由根项目 classpath 决定
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.detekt)
 }
@@ -17,13 +17,13 @@ val ndkVersionUsed = "27.2.12479018"
 
 android {
     namespace = "dev.wrtctrl"
-    compileSdk = 35
+    compileSdk = 37
     ndkVersion = ndkVersionUsed
 
     defaultConfig {
         applicationId = "dev.wrtctrl.app"
         minSdk = 29
-        targetSdk = 35
+        targetSdk = 37
         versionCode = 1
         versionName = "1.0.0"
     }
@@ -81,10 +81,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = "17"
     }
 
     buildFeatures {

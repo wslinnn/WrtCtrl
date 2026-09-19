@@ -48,7 +48,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -58,19 +57,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
-import com.patrykandpatrick.vico.compose.cartesian.axis.rememberBottom
-import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStart
+import com.patrykandpatrick.vico.compose.cartesian.AutoScrollCondition
+import com.patrykandpatrick.vico.compose.cartesian.Scroll
+import com.patrykandpatrick.vico.compose.cartesian.axis.HorizontalAxis
+import com.patrykandpatrick.vico.compose.cartesian.axis.VerticalAxis
+import com.patrykandpatrick.vico.compose.cartesian.data.CartesianChartModelProducer
+import com.patrykandpatrick.vico.compose.cartesian.data.lineModel
+import com.patrykandpatrick.vico.compose.cartesian.layer.LineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
 import com.patrykandpatrick.vico.compose.cartesian.rememberVicoScrollState
-import com.patrykandpatrick.vico.core.cartesian.AutoScrollCondition
-import com.patrykandpatrick.vico.core.cartesian.Scroll
-import com.patrykandpatrick.vico.core.cartesian.axis.HorizontalAxis
-import com.patrykandpatrick.vico.core.cartesian.axis.VerticalAxis
-import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
-import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
-import com.patrykandpatrick.vico.core.cartesian.layer.LineCartesianLayer
-import com.patrykandpatrick.vico.core.common.Fill
+import com.patrykandpatrick.vico.compose.common.Fill
 import dev.wrtctrl.R
 import dev.wrtctrl.data.DashboardCardId
 import dev.wrtctrl.util.Format
@@ -486,7 +483,7 @@ private fun BandwidthChart(
     LaunchedEffect(rx, tx) {
         if (rx.isEmpty() || tx.isEmpty()) return@LaunchedEffect
         modelProducer.runTransaction {
-            lineSeries {
+            lineModel {
                 series(rx)
                 series(tx)
             }
@@ -495,6 +492,8 @@ private fun BandwidthChart(
     var selectedIndex by remember { mutableIntStateOf(-1) }
     val currentRx by rememberUpdatedState(rx)
     val currentTx by rememberUpdatedState(tx)
+    // X 轴 formatter 捕获此 State（身份稳定）而非 timestamps 实例：列表每 3s 换新引用，
+    // 轴不会跟着重建（与 lineProvider remember 同理——配置常驻，数据只走 producer）
     val currentTs by rememberUpdatedState(timestamps)
     Box(modifier) {
         if (rx.isEmpty()) {
@@ -505,19 +504,23 @@ private fun BandwidthChart(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
-            // 对齐旧 home.vue：平滑曲线 + 半透明面积填充（纯色，见顶部常量注释）
-            val lineProvider = LineCartesianLayer.LineProvider.series(
-                LineCartesianLayer.Line(
-                    fill = LineCartesianLayer.LineFill.single(Fill(Color(RX_COLOR).toArgb())),
-                    areaFill = LineCartesianLayer.AreaFill.single(Fill(RX_AREA)),
-                    pointConnector = LineCartesianLayer.PointConnector.cubic(),
-                ),
-                LineCartesianLayer.Line(
-                    fill = LineCartesianLayer.LineFill.single(Fill(Color(TX_COLOR).toArgb())),
-                    areaFill = LineCartesianLayer.AreaFill.single(Fill(TX_AREA)),
-                    pointConnector = LineCartesianLayer.PointConnector.cubic(),
-                ),
-            )
+            // 对齐旧 home.vue：平滑曲线 + 半透明面积填充（纯色，见顶部常量注释）。
+            // lineProvider 必须 remember：它是静态配置（颜色/线型），内联构造会让 Vico 以其
+            // 为 key 的图表层每次重组都重建重绘（轮询期帧尖峰根因）；数据更新只走 modelProducer。
+            val lineProvider = remember {
+                LineCartesianLayer.LineProvider.series(
+                    LineCartesianLayer.Line(
+                        fill = LineCartesianLayer.LineFill.single(Fill(Color(RX_COLOR))),
+                        areaFill = LineCartesianLayer.AreaFill.single(Fill(Color(RX_AREA))),
+                        pointConnector = LineCartesianLayer.PointConnector.cubic(),
+                    ),
+                    LineCartesianLayer.Line(
+                        fill = LineCartesianLayer.LineFill.single(Fill(Color(TX_COLOR))),
+                        areaFill = LineCartesianLayer.AreaFill.single(Fill(Color(TX_AREA))),
+                        pointConnector = LineCartesianLayer.PointConnector.cubic(),
+                    ),
+                )
+            }
             val inbound = stringResource(R.string.statistics_inbound)
             val outbound = stringResource(R.string.statistics_outbound)
             val timeFmt = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
@@ -535,8 +538,8 @@ private fun BandwidthChart(
                     ),
                     bottomAxis = HorizontalAxis.rememberBottom(
                         valueFormatter = { _, value, _ ->
-                            val idx = value.roundToInt().coerceIn(0, timestamps.lastIndex)
-                            timestamps.getOrNull(idx)?.let { timeFmt.format(Date(it * 1000)) } ?: ""
+                            val idx = value.roundToInt()
+                            currentTs.getOrNull(idx)?.let { timeFmt.format(Date(it * 1000)) } ?: ""
                         },
                     ),
                 ),

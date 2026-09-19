@@ -161,7 +161,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 lanIp = poll.ifaceDump?.let(HomeParsers::lanIp) ?: state.lanIp,
                 gateway = poll.ifaceDump?.let(HomeParsers::gateway) ?: state.gateway,
                 dns = poll.ifaceDump?.let(HomeParsers::dns) ?: state.dns,
-                mounts = poll.mounts?.let(HomeParsers::mountList) ?: state.mounts,
+                // 内容不变的列表保持同实例：引用稳定才能让未变化的卡在重组中被跳过
+                mounts = poll.mounts?.let(HomeParsers::mountList)
+                    ?.takeIf { it != state.mounts } ?: state.mounts,
             )
         }
 

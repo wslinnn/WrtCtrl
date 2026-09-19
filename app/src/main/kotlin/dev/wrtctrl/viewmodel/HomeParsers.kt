@@ -20,6 +20,9 @@ data class MountInfo(
  */
 internal object HomeParsers {
 
+    /** 轮询周期调用的高频解析，正则常量化避免每 3s 重复编译 */
+    private val NUMERIC = Regex("([0-9]+(?:\\.[0-9]+)?)")
+
     /** 设备型号；缺失回落发行版名（板卡厂常不写 model） */
     fun model(board: JSONObject): String {
         val distribution = board.optJSONObject("release")
@@ -66,7 +69,7 @@ internal object HomeParsers {
      *  多分支格式兼容不保留，只走单条解析路径，失败返回 null 隐藏环。 */
     fun cpuPercent(cpu: JSONObject): Int? {
         val raw = cpu.opt("cpuusage")?.toString() ?: return null
-        val m = Regex("([0-9]+(?:\\.[0-9]+)?)").find(raw) ?: return null
+        val m = NUMERIC.find(raw) ?: return null
         var v = m.groupValues[1].toDoubleOrNull() ?: return null
         if (v <= 1.0) v *= 100.0
         return v.coerceIn(0.0, 100.0).roundToInt()
@@ -75,7 +78,7 @@ internal object HomeParsers {
     /** 温度（℃）。取 tempinfo 首个数字；无传感器/为 0 → null，调用方隐藏温度环 */
     fun tempC(temp: JSONObject): Int? {
         val raw = temp.opt("tempinfo")?.toString() ?: return null
-        val m = Regex("([0-9]+(?:\\.[0-9]+)?)").find(raw) ?: return null
+        val m = NUMERIC.find(raw) ?: return null
         val v = m.groupValues[1].toDoubleOrNull() ?: return null
         if (v <= 0.0) return null
         return v.roundToInt()
