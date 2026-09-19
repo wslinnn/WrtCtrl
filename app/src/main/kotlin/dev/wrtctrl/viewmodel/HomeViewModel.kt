@@ -10,6 +10,7 @@ import dev.wrtctrl.data.DashboardPrefs
 import dev.wrtctrl.util.Format
 import dev.wrtctrl.util.Format.bandwidthRates
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -206,6 +207,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             withContext(Dispatchers.IO) {
                 WrtCore.callUbus("luci", "getRealtimeStats", JSONObject().put("mode", "interface").put("device", target), 3000)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             return
         }
@@ -230,14 +233,19 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // 轮询容错吞掉业务异常，但 CancellationException 必须外抛（吞掉会破坏结构化取消）
     private suspend fun ubusSafe(objectName: String, method: String): JSONObject? = try {
         withContext(Dispatchers.IO) { WrtCore.callUbus(objectName, method) }
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Exception) {
         null
     }
 
     private suspend fun readSafe(path: String): String? = try {
         withContext(Dispatchers.IO) { WrtCore.readFile(path) }
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: Exception) {
         null
     }
@@ -270,7 +278,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private fun JSONObject.loadString(): String? {
         val arr = optJSONArray("load") ?: return null
         if (arr.length() < 3) return null
-        return (0 until 3).joinToString(" ") { String.format("%.2f", arr.optDouble(it) / 65536.0) }
+        return (0 until 3).joinToString(" ") { String.format(java.util.Locale.US, "%.2f", arr.optDouble(it) / 65536.0) }
     }
 
     /** CPU 使用率（%）。数据源 = luci getCPUUsage 的 cpuusage 字段——部分回退：
@@ -298,7 +306,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val total = memory.optLong("total")
         if (total <= 0) return 0
         val used = total - memory.optLong("available")
-        return (used.toDouble() / total * 100).roundToLong().toInt()
+        return (used.toDouble() / total * 100).roundToLong().toInt().coerceIn(0, 100)
     }
 
     private fun JSONObject.memoryDetail(): String {
@@ -366,7 +374,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             val total = entry.optLong("size")
             val free = entry.optLong("free")
             val used = total - free
-            val percent = if (total > 0) (used.toDouble() / total * 100).roundToLong().toInt() else 0
+            val percent = if (total > 0) (used.toDouble() / total * 100).roundToLong().toInt().coerceIn(0, 100) else 0
             MountInfo(
                 device = entry.optString("device", "--").ifBlank { "--" },
                 mount = entry.optString("mount", "--").ifBlank { "--" },

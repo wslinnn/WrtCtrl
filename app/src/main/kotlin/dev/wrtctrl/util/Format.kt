@@ -1,5 +1,6 @@
 package dev.wrtctrl.util
 
+import java.util.Locale
 import kotlin.math.floor
 import kotlin.math.ln
 import kotlin.math.pow
@@ -10,12 +11,15 @@ import org.json.JSONArray
 /** 数值/时长/带宽格式化 + 采样差分 */
 object Format {
 
+    // 数值格式固定 Locale：避免系统语言为逗号小数区时输出「1,2 KB」类歧义文本（zh/en 均为点号，行为不变）
+    private val NUM = Locale.US
+
     /** 1024 进制：B 整数 / KB 1 位小数 / MB·GB 2 位 */
     fun bytes(b: Long): String = when {
         b < 1024 -> "$b B"
-        b < 1024 * 1024 -> String.format("%.1f KB", b / 1024.0)
-        b < 1024L * 1024 * 1024 -> String.format("%.2f MB", b / 1024.0 / 1024)
-        else -> String.format("%.2f GB", b / 1024.0 / 1024 / 1024)
+        b < 1024 * 1024 -> String.format(NUM, "%.1f KB", b / 1024.0)
+        b < 1024L * 1024 * 1024 -> String.format(NUM, "%.2f MB", b / 1024.0 / 1024)
+        else -> String.format(NUM, "%.2f GB", b / 1024.0 / 1024 / 1024)
     }
 
     /** 速率自适应单位：B/s 整数 / KB/s 整数 / MB·GB 1 位小数 */
@@ -26,7 +30,7 @@ object Format {
         if (i >= units.size) i = units.size - 1
         if (i <= 0) return "$value B/s"
         val n = value / 1024.0.pow(i)
-        return if (i == 1) "${n.roundToInt()} ${units[i]}" else String.format("%.1f %s", n, units[i])
+        return if (i == 1) "${n.roundToInt()} ${units[i]}" else String.format(NUM, "%.1f %s", n, units[i])
     }
 
     fun duration(seconds: Long): String {

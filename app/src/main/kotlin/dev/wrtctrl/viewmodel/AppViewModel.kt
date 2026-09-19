@@ -15,6 +15,7 @@ import dev.wrtctrl.data.DeviceRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -112,7 +113,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun pingAll(devices: List<Device>) {
         devices.forEach { device ->
             viewModelScope.launch {
-                val ms = runCatching { WrtCore.pingUrl(device.baseUrl) }.getOrNull()
+                val ms = try {
+                    WrtCore.pingUrl(device.baseUrl)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    null
+                }
                 _gate.update { it.copy(pings = it.pings + (device.id to ms)) }
             }
         }
@@ -205,8 +212,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 表单返回列表；无设备时表单不可退（首跑场景） */
-    fun backToList() = openDeviceList()
+    /** 表单返回列表；无设备时表单不可退（首跑场景）。保留快速切换语境：
+     *  从主页顶栏进入的，回列表后手势返回仍应回主页而非退桌面 */
+    fun backToList() = openDeviceList(fromMain = gateCameFromMain)
 
     fun updateForm(transform: (FormState) -> FormState) {
         _gate.update { it.copy(form = transform(it.form)) }
@@ -228,6 +236,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteDevice(id: String) {
         viewModelScope.launch {
             repo.delete(id)
+            // 删除的是当前连接设备时同步清 _current，否则列表徽章仍显示「当前」
+            if (_current.value?.id == id) _current.value = null
             val devices = repo.list()
             _gate.update {
                 it.copy(
@@ -317,6 +327,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         formErrorCode = e.code,
                     )
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 android.util.Log.w("wrtctrl", "connect failed: ${e.message}")
                 _gate.update {
