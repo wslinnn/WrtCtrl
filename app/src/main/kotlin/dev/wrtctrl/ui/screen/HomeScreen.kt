@@ -515,6 +515,12 @@ private fun RingColumn(
     }
 }
 
+/** 图表时间戳（秒级 epoch）→ HH:mm:ss。轴与 marker 共用同一实现：
+ *  曾两处各写各的，marker 侧用方法引用 `timeFmt::format` 绑定到 format(Object)，
+ *  把秒当毫秒格式化，标签恒显示 1970 年的 01:10:xx（务必避免回归） */
+private fun formatChartTime(tsSec: Long, fmt: SimpleDateFormat): String =
+    fmt.format(Date(tsSec * 1000))
+
 /** 实时带宽双折线（Vico 3.3.1）：rx/tx 两条线 + 坐标轴 + 点击查值。
  *  查值用 Vico 原生 marker（ToggleOnTap：点按显示、再点隐藏；guideline 与圆点由库绘制），
  *  命中测试/滚动/轴宽换算全部由库完成——自制浮层的像素反推索引忽略了 Y 轴占宽与滚动偏移，
@@ -577,7 +583,7 @@ private fun BandwidthChart(
                     val lineTarget = targets.filterIsInstance<LineCartesianLayerMarkerTarget>().firstOrNull()
                     val idx = lineTarget?.x?.roundToInt()
                     buildString {
-                        append(idx?.let { i -> currentTs.getOrNull(i)?.let(timeFmt::format) } ?: "")
+                        append(idx?.let { i -> currentTs.getOrNull(i)?.let { formatChartTime(it, timeFmt) } } ?: "")
                         lineTarget?.points?.getOrNull(0)?.entry?.y?.let { y ->
                             append("\n$inbound: ").append(Format.rate(y.roundToLong()))
                         }
@@ -603,7 +609,7 @@ private fun BandwidthChart(
                     bottomAxis = HorizontalAxis.rememberBottom(
                         valueFormatter = { _, value, _ ->
                             val idx = value.roundToInt()
-                            currentTs.getOrNull(idx)?.let { timeFmt.format(Date(it * 1000)) } ?: ""
+                            currentTs.getOrNull(idx)?.let { formatChartTime(it, timeFmt) } ?: ""
                         },
                     ),
                     marker = marker,
