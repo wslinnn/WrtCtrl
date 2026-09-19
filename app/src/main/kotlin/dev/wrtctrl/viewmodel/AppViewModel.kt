@@ -275,8 +275,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             try {
+                val editingId = _gate.value.editingId
                 val device = Device(
-                    id = _gate.value.editingId ?: UUID.randomUUID().toString(),
+                    id = editingId ?: UUID.randomUUID().toString(),
                     name = form.name,
                     host = form.host,
                     port = checkedPort,
@@ -286,15 +287,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 WrtCore.setDevice(device.baseUrl, device.username, device.password, null)
                 WrtCore.login()
-                if (_gate.value.editingId != null && repo.get(device.id) != null) {
+                if (editingId != null && repo.get(editingId) != null) {
                     repo.update(device)
+                    repo.setCurrent(editingId)
                 } else {
                     repo.add(
                         host = device.host, port = device.port, useHttps = device.useHttps,
                         username = device.username, password = device.password, name = device.name,
-                    ).let { saved -> repo.setCurrent(saved.id) }
+                    ).let { repo.setCurrent(it.id) }
                 }
-                if (_gate.value.editingId != null) repo.setCurrent(device.id)
                 _current.value = device
                 gateCameFromMain = false
                 _phase.value = Phase.Main

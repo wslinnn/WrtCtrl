@@ -20,7 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Language
@@ -32,7 +32,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -144,15 +147,16 @@ private fun ListMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () ->
                 } else {
                     LazyColumn(Modifier.fillMaxSize()) {
                         items(state.devices, key = { it.id }) { device ->
-                            DeviceCard(
-                                device = device,
-                                pingMs = state.pings[device.id],
-                                isCurrent = vm.current.value?.id == device.id,
-                                connecting = state.connecting,
-                                onClick = { vm.connectTo(device) },
-                                onEdit = { vm.openForm(device) },
-                                onDelete = { deleting = device },
-                            )
+                        DeviceCard(
+                            device = device,
+                            pingMs = state.pings[device.id],
+                            pingDetecting = device.id !in state.pings,
+                            isCurrent = vm.current.value?.id == device.id,
+                            connecting = state.connecting,
+                            onClick = { vm.connectTo(device) },
+                            onEdit = { vm.openForm(device) },
+                            onDelete = { deleting = device },
+                        )
                         }
                     }
                 }
@@ -183,6 +187,8 @@ private fun ListMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () ->
 private fun DeviceCard(
     device: Device,
     pingMs: Long?,
+    /** 该设备尚未有探测结果（键不存在）：区分「检测中」与「已探测=离线」 */
+    pingDetecting: Boolean,
     isCurrent: Boolean,
     connecting: Boolean,
     onClick: () -> Unit,
@@ -226,18 +232,18 @@ private fun DeviceCard(
                 )
             }
             Spacer(Modifier.size(8.dp))
-            PingBadge(pingMs)
+            PingBadge(pingMs, pingDetecting)
             Box {
                 IconButton(onClick = { menuOpen = true }) {
                     Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.device_list_more_aria))
                 }
-                androidx.compose.material3.DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    androidx.compose.material3.DropdownMenuItem(
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
                         text = { Text(stringResource(R.string.device_list_edit)) },
                         leadingIcon = { Icon(Icons.Filled.Edit, null) },
                         onClick = { menuOpen = false; onEdit() },
                     )
-                    androidx.compose.material3.DropdownMenuItem(
+                    DropdownMenuItem(
                         text = { Text(stringResource(R.string.device_list_delete), color = MaterialTheme.colorScheme.error) },
                         leadingIcon = { Icon(Icons.Filled.Delete, null, tint = MaterialTheme.colorScheme.error) },
                         onClick = { menuOpen = false; onDelete() },
@@ -249,8 +255,9 @@ private fun DeviceCard(
 }
 
 @Composable
-private fun PingBadge(pingMs: Long?) {
+private fun PingBadge(pingMs: Long?, detecting: Boolean) {
     val (text, color) = when {
+        detecting -> stringResource(R.string.device_list_ping_checking) to MaterialTheme.colorScheme.onSurfaceVariant
         pingMs == null -> stringResource(R.string.device_list_ping_offline) to MaterialTheme.colorScheme.error
         else -> "${pingMs}ms" to pingColor(pingMs)
     }
@@ -270,7 +277,7 @@ private fun pingColor(ms: Long): Color = when {
 
 @Composable
 private fun ExtendedAddButton(onClick: () -> Unit) {
-    androidx.compose.material3.ExtendedFloatingActionButton(onClick = onClick) {
+    ExtendedFloatingActionButton(onClick = onClick) {
         Text(stringResource(R.string.device_list_add_new_device))
     }
 }
@@ -304,7 +311,7 @@ private fun FormMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () ->
                 navigationIcon = {
                     if (hasDevices || editing) {
                         IconButton(onClick = { vm.backToList() }) {
-                            Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.common_cancel))
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_cancel))
                         }
                     }
                 },

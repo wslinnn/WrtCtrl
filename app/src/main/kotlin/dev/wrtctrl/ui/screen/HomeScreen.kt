@@ -71,7 +71,6 @@ import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
 import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
 import com.patrykandpatrick.vico.core.cartesian.layer.LineCartesianLayer
 import com.patrykandpatrick.vico.core.common.Fill
-import com.patrykandpatrick.vico.core.common.shader.LinearGradientShaderProvider
 import dev.wrtctrl.R
 import dev.wrtctrl.data.DashboardCardId
 import dev.wrtctrl.util.Format

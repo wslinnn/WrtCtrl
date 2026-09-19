@@ -9,7 +9,6 @@ import dev.wrtctrl.data.DashboardConfig
 import dev.wrtctrl.data.DashboardPrefs
 import dev.wrtctrl.util.Format
 import dev.wrtctrl.util.Format.bandwidthRates
-import dev.wrtctrl.util.formatBytes
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
@@ -74,9 +73,10 @@ data class HomeUiState(
 )
 
 /**
- * 首页仪表盘：3s 轮询 8 项数据（对齐旧 home.vue 但剔除两个死轮询）。
- * 带宽目标 = wan 优先（l3_device），无 wan 回落 br-lan（旧 getQuickBandwidthTarget）。
- * 轮询绑定本 ViewModel 生命周期：离开主界面自动停止（行为偏差表 B1 修复的延伸）。
+ * 首页仪表盘轮询：每 3s 一次并发 8 项（board / info / conntrack×2 / iface dump /
+ * getTempInfo / getMountPoints / getCPUUsage）+ 带宽差分（getRealtimeStats）。
+ * getCPUUsage 为 部分回退（CPU 环需求，见 ；轮询绑定本 ViewModel
+ * 生命周期：离开主界面自动停止（行为偏差表 B1 修复的延伸）。
  */
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(HomeUiState())
@@ -255,8 +255,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun JSONObject.model(): String {
         val distribution = optJSONObject("release")?.optString("distribution", "OpenWrt")?.ifBlank { "OpenWrt" } ?: "OpenWrt"
-        val version = optJSONObject("release")?.optString("version") ?: ""
-        val kernel = optString("kernel")
         return optString("model").ifBlank { distribution }
     }
 
@@ -307,7 +305,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val memory = optJSONObject("memory") ?: return "--"
         val total = memory.optLong("total")
         val used = total - memory.optLong("available")
-        return "${formatBytes(used)} / ${formatBytes(total)}"
+        return "${Format.bytes(used)} / ${Format.bytes(total)}"
     }
 
     private fun connectionsText(count: String?, max: String?): String? {
@@ -373,7 +371,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 device = entry.optString("device", "--").ifBlank { "--" },
                 mount = entry.optString("mount", "--").ifBlank { "--" },
                 usagePercent = percent,
-                detail = "${formatBytes(used)} / ${formatBytes(total)}",
+                detail = "${Format.bytes(used)} / ${Format.bytes(total)}",
             )
         }
         return list

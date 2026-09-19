@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- 手写资源（生成的 strings 在 strings_generated.xml，由 tools/gen-strings.mjs 产出） -->
-    <string name="debug_panic_drill">panic drill</string>
     <string name="device_list_error_dns">DNS lookup failed: the hostname has no address on this network. If the domain is IPv6-only and your WiFi has no IPv6, use mobile data or connect via the LAN IP</string>
     <string name="device_list_error_refused">Connection refused: the device is unreachable or the port is closed. Check the device status and firewall rules</string>
     <string name="debug_last_crash">Last crash</string>

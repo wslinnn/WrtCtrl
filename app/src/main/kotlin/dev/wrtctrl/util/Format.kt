@@ -18,6 +18,7 @@ object Format {
         else -> String.format("%.2f GB", b / 1024.0 / 1024 / 1024)
     }
 
+    /** 速率自适应单位：B/s 整数 / KB/s 整数 / MB·GB 1 位小数 */
     fun rate(value: Long): String {
         if (value <= 0) return "0 B/s"
         val units = listOf("B/s", "KB/s", "MB/s", "GB/s")
@@ -76,12 +77,4 @@ object Format {
         }
         return series
     }
-}
-
-/** 1024 进制：B 整数 / KB 1 位小数 / MB·GB 2 位 */
-fun formatBytes(b: Long): String = when {
-    b < 1024 -> "$b B"
-    b < 1024 * 1024 -> String.format("%.1f KB", b / 1024.0)
-    b < 1024L * 1024 * 1024 -> String.format("%.2f MB", b / 1024.0 / 1024)
-    else -> String.format("%.2f GB", b / 1024.0 / 1024 / 1024)
 }
