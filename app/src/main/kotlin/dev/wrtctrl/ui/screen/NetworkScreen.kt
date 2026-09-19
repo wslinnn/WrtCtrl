@@ -33,6 +33,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -43,7 +44,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import dev.wrtctrl.R
 import dev.wrtctrl.ui.component.Badge
 import dev.wrtctrl.ui.component.CopyableRow
@@ -65,9 +69,26 @@ fun NetworkScreen(vm: NetworkViewModel, deviceId: String?, modifier: Modifier = 
     val state by vm.state.collectAsStateWithLifecycle()
     LaunchedEffect(deviceId) { vm.ensureLoaded(deviceId) }
     var tab by remember { mutableIntStateOf(0) }
-    // 无线数据首进该 Tab 才拉（loadWireless 自带 wirelessLoaded 门）
+    // 无线数据首进该 Tab 才拉（loadWireless 自带 wirelessLoaded 门）+ 轮询目标上报
     LaunchedEffect(tab) {
         if (tab == 2) vm.loadWireless()
+        vm.onTab(tab)
+    }
+    // 可见才轮询：Bottom Tab 选中时本屏才组合（组合级可见），后台再叠加生命周期门控
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> vm.setPollingActive(true)
+                Lifecycle.Event.ON_PAUSE -> vm.setPollingActive(false)
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            vm.setPollingActive(false)
+        }
     }
     Column(modifier) {
         val tabs = listOf(

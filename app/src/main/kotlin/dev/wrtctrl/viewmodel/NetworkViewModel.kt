@@ -9,7 +9,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -27,15 +29,40 @@ data class NetworkUiState(
 )
 
 /**
- * 网络页状态：三个 ubus 调用，无轮询。
- * 拉取失败静默落空态（错误链只进 logcat）；
- * 切设备后 ensureLoaded 触发整页重拉（缓存清空惯例）。
+ * 网络页状态（客户端页同款轮询纪律）：三个 ubus 调用。
+ * 轮询：页面可见期间每 3s 静默刷新
+ * 当前 Tab 对应数据（接口/设备 Tab→dump+devices，无线 Tab→wireless），
+ * 离开页面/后台暂停（Bottom Tab 组合级可见性 + 生命周期门控）。
+ * 拉取失败静默保留旧值（ 错误链只进 logcat）；切设备整页失效重拉。
  */
 class NetworkViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(NetworkUiState())
     val state: StateFlow<NetworkUiState> = _state
 
     private var loadedDeviceId: String? = null
+
+    /** 轮询开关与当前 Tab（页面可见性/生命周期由屏幕层驱动） */
+    private val pollingActive = MutableStateFlow(false)
+    private var polledTab = 0
+
+    fun setPollingActive(active: Boolean) {
+        pollingActive.value = active
+    }
+
+    fun onTab(tab: Int) {
+        polledTab = tab
+    }
+
+    init {
+        viewModelScope.launch {
+            while (viewModelScope.isActive) {
+                // 挂起直至页面可见；先等一个周期再刷——进页的手动拉取不重复
+                pollingActive.first { it }
+                delay(POLL_INTERVAL)
+                if (polledTab == 2) loadWirelessNow() else loadNow()
+            }
+        }
+    }
 
     /** 设备切换失效重拉：无线数据一并失效，回到无线 Tab 会重新拉取；同设备重复进入不重拉 */
     fun ensureLoaded(deviceId: String?) {
@@ -107,5 +134,10 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
     } catch (e: Exception) {
         android.util.Log.w("wrtctrl", "ubus $objectName.$method failed: ${e.message}")
         null
+    }
+
+    private companion object {
+        /** 轮询周期：与首页一致（可见时静默刷新） */
+        const val POLL_INTERVAL = 3000L
     }
 }
