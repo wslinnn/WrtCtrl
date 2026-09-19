@@ -44,6 +44,8 @@ data class GateUiState(
     val fieldErrors: Map<String, Int> = emptyMap(),
     val formErrorText: String? = null,
     val formErrorCode: String? = null,
+    /** 原始错误链（临时诊断用：区分连接超时/响应超时/拒绝），修复后移除 */
+    val formErrorDetail: String? = null,
     val connecting: Boolean = false,
     val editingId: String? = null,
     /** 列表下拉刷新进行中 */
@@ -196,6 +198,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 fieldErrors = emptyMap(),
                 formErrorText = null,
                 formErrorCode = null,
+                formErrorDetail = null,
                 form = if (device != null) {
                     FormState(
                         host = device.host,
@@ -259,7 +262,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         // 走到这里校验必已通过：端口非空且在 1..65535
         val checkedPort = form.port.toIntOrNull() ?: 80
         _gate.update {
-            it.copy(fieldErrors = emptyMap(), connecting = true, formErrorText = null, formErrorCode = null)
+            it.copy(fieldErrors = emptyMap(), connecting = true, formErrorText = null, formErrorCode = null, formErrorDetail = null)
         }
         viewModelScope.launch {
             try {
@@ -303,6 +306,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         connecting = false,
                         formErrorText = str(textRes),
                         formErrorCode = e.code,
+                        formErrorDetail = e.message,
                     )
                 }
             } catch (e: CancellationException) {
@@ -314,6 +318,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         connecting = false,
                         formErrorText = str(R.string.device_list_error_other),
                         formErrorCode = "other",
+                        formErrorDetail = e.message,
                     )
                 }
             }

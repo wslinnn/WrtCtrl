@@ -17,7 +17,7 @@ complexity:
   TooManyFunctions:
     thresholdInClasses: 16
     thresholdInObjects: 16
-    thresholdInFiles: 12
+    thresholdInFiles: 14
     # 状态机 VM（AppViewModel 14 个用例函数）、解析器对象（HomeParsers 14 个纯函数）
     # 与承载共享顶栏入口的 Screen 文件，函数数天然偏多；拆分反而割裂内聚
 

@@ -448,17 +448,7 @@ private fun FormMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () ->
             )
 
             state.formErrorText?.let { errorText ->
-                Card(
-                    Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                ) {
-                    Text(
-                        errorText,
-                        Modifier.padding(12.dp),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                    )
-                }
+                FormErrorCard(text = errorText, code = state.formErrorCode, detail = state.formErrorDetail)
             }
 
             Button(
@@ -484,6 +474,38 @@ private fun SectionLabel(text: String) {
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+}
+
+/** 表单错误卡：分类指引 + 临时诊断行（原始错误码与错误链，定位连接问题后移除） */
+@Composable
+private fun FormErrorCard(text: String, code: String?, detail: String?) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+    ) {
+        Text(
+            text,
+            Modifier.padding(12.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+        )
+        code?.let { c ->
+            Text(
+                "code: $c",
+                Modifier.padding(start = 12.dp, end = 12.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+        }
+        detail?.let { d ->
+            Text(
+                d,
+                Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+        }
+    }
 }
 
 @Composable

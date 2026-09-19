@@ -15,6 +15,10 @@ use tokio::sync::RwLock;
 /// rpcd session.login 用的临时会话（全 0），登录成功后换 ubus_rpc_session
 pub const EMPTY_SESSION: &str = "00000000000000000000000000000000";
 
+/// TCP 连接超时（独立于请求硬超时）：连接失败与「已连上但对端不应答」在错误链上
+/// 可区分——前者是网络路径/防火墙问题，后者是服务端问题
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// 设备会话上下文（设备列表持久化在 Kotlin 层）
 #[derive(Debug, Clone)]
 pub struct DeviceSession {
@@ -54,6 +58,7 @@ impl RouterClient {
         let http = reqwest::Client::builder()
             .danger_accept_invalid_certs(accept_invalid_certs)
             .no_proxy()
+            .connect_timeout(CONNECT_TIMEOUT)
             .build()
             .expect("reqwest client build failed");
         Self {
