@@ -23,8 +23,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
@@ -56,7 +54,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -335,7 +332,9 @@ private fun RateBlock(label: String, rate: Long, color: Color) {
 }
 
 /** 资源监控环组：CPU → 内存 → 温度 一行三环。磁盘不入环组：与存储信息卡重复，
- *  由其卡头摘要（overlay %）+ 挂载点明细承担；数据不可得的环整环移除，余环 SpaceEvenly 聚拢。 */
+ *  由其卡头摘要（overlay %）+ 挂载点明细承担；数据不可得的环整环移除，余环等分聚拢。
+ *  自适应，环径 = 列宽 − 2×呼吸边距，随屏幕伸缩；
+ *  环间间隙 = 16dp 设计常量，不靠剩余空间施舍。 */
 @Composable
 private fun ResourceRings(state: HomeUiState) {
     val specs = buildList {
@@ -347,10 +346,15 @@ private fun ResourceRings(state: HomeUiState) {
             add(RingSpec(stringResource(R.string.home_temperature), percent, "$temp℃", null))
         }
     }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+    Row(Modifier.fillMaxWidth()) {
         specs.forEach { spec ->
-            // 96dp：3 环 × 96 = 288dp，360dp 手机内容区（约 296dp）内不触发 Row 挤压
-            RingColumn(spec.label, spec.percent, spec.centerText, spec.detail, 96.dp)
+            RingColumn(
+                label = spec.label,
+                percent = spec.percent,
+                centerText = spec.centerText,
+                detail = spec.detail,
+                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+            )
         }
     }
 }
@@ -435,18 +439,18 @@ private fun Ring(
 }
 
 /** 资源监控环单元：环 + 环下明细（内存=used/total，CPU=负载均值；空明细不占位）。
- *  列宽锁定为环径：明细文字在固定宽度内换行，不撑宽列——否则 Row 宽度不足时
- *  会挤压末位环的水平约束，环被压成椭圆（实测复现）。 */
+ *  环为 fillMaxWidth + aspectRatio(1f) 正方形：列宽由 weight 决定，环随列伸缩恒为正圆
+ *  （绝对环径的列会被明细文字撑宽/被 Row 挤压——历史椭圆问题根因，。 */
 @Composable
 private fun RingColumn(
     label: String,
     percent: Int,
     centerText: String?,
     detail: String?,
-    ringSize: Dp,
+    modifier: Modifier = Modifier,
 ) {
     Column(
-        Modifier.width(ringSize),
+        modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Ring(
@@ -454,7 +458,7 @@ private fun RingColumn(
             percent = percent,
             centerText = centerText,
             modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-            compact = ringSize < 100.dp,
+            compact = true,
         )
         if (!detail.isNullOrBlank()) {
             Spacer(Modifier.height(8.dp))
