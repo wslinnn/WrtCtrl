@@ -46,6 +46,22 @@ object Format {
         return str
     }
 
+    /** 紧凑计数（1.2k 风格、k≥100 取整、.0 尾去零；无 M 档） */
+    fun compactCount(n: Long): String {
+        if (n < 1000) return n.toString()
+        val k = n / 1000.0
+        val num = if (k >= 100) {
+            String.format(NUM, "%.0f", k)
+        } else {
+            String.format(NUM, "%.1f", k)
+        }
+        return (if (num.endsWith(".0")) num.dropLast(2) else num) + "k"
+    }
+
+    /** 无线码率：iwinfo.bitrate 单位 kbit/s → Mbit/s 保留 1 位 */
+    fun bitrate(kbitPerSec: Double): String =
+        String.format(NUM, "%.1f Mbit/s", kbitPerSec / 1000.0)
+
     data class BandwidthSeries(
         val timestamps: MutableList<Long> = mutableListOf(),
         val rx: MutableList<Double> = mutableListOf(),

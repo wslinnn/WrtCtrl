@@ -60,9 +60,11 @@ import dev.wrtctrl.ui.screen.DeviceGateScreen
 import dev.wrtctrl.ui.screen.HomeScreen
 import dev.wrtctrl.ui.screen.LanguageAction
 import dev.wrtctrl.ui.screen.LanguageScreen
+import dev.wrtctrl.ui.screen.NetworkScreen
 import dev.wrtctrl.ui.screen.ThemeAction
 import dev.wrtctrl.viewmodel.AppViewModel
 import dev.wrtctrl.viewmodel.HomeViewModel
+import dev.wrtctrl.viewmodel.NetworkViewModel
 import dev.wrtctrl.viewmodel.Phase
 
 private data class TabSpec(@StringRes val labelRes: Int, val icon: ImageVector)
@@ -164,6 +166,11 @@ private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
     val homeVm: HomeViewModel = viewModel(
         factory = viewModelFactory { initializer { HomeViewModel(app) } }
     )
+    val networkVm: NetworkViewModel = viewModel(
+        factory = viewModelFactory { initializer { NetworkViewModel(app) } }
+    )
+    // 网络页按当前设备失效缓存（切设备重拉）
+    val currentDevice by vm.current.collectAsStateWithLifecycle()
     Scaffold(
         topBar = {
             TopAppBar(
@@ -207,6 +214,7 @@ private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
                         HomeScreen(homeVm, Modifier.fillMaxSize())
                     }
                 }
+                3 -> NetworkScreen(networkVm, currentDevice?.id, Modifier.fillMaxSize())
                 else -> PlaceholderText(stringResource(TABS[selected].labelRes), Modifier.fillMaxSize())
             }
         }

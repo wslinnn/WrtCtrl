@@ -20,4 +20,7 @@
     <!-- 折叠卡头语义（a11y） -->
     <string name="common_expand">展开</string>
     <string name="common_collapse">收起</string>
+    <!-- 网络页（其余标签复用生成键 network_* / wifi_no_radio / device_list_settings） -->
+    <string name="common_close">关闭</string>
+    <string name="network_empty">无数据</string>
 </resources>

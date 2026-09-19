@@ -18,4 +18,7 @@
     <!-- Collapsible header semantics (a11y) -->
     <string name="common_expand">Expand</string>
     <string name="common_collapse">Collapse</string>
+    <!-- Network page (other labels reuse generated keys network_* / wifi_no_radio / device_list_settings) -->
+    <string name="common_close">Close</string>
+    <string name="network_empty">No data</string>
 </resources>
