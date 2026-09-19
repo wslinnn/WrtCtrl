@@ -116,25 +116,6 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** 踢人：成功后重拉无线列表；结果与失败原因（core 错误串）经回调上 toast */
-    fun kick(client: WifiClient, onDone: (ok: Boolean, error: String?) -> Unit) {
-        viewModelScope.launch {
-            var ok = false
-            var error: String? = null
-            try {
-                WrtCore.kickClient(client.ifname, client.mac)
-                ok = true
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                error = e.message
-                android.util.Log.w("wrtctrl", "kick failed: $error")
-            }
-            onDone(ok, error)
-            if (ok) loadWireless()
-        }
-    }
-
     /** 下拉刷新：重拉当前 Tab（无线 Tab 连带刷新 DHCP 缓存），指示器最短 400ms */
     fun refresh(tab: Int) {
         if (_state.value.refreshing) return

@@ -212,10 +212,6 @@
     <string name="client_offline">Offline</string>
     <string name="client_currently_visiting">Currently visiting</string>
     <string name="client_load_failed">Load Failed</string>
-    <string name="client_tip">Tip</string>
-    <string name="client_confirm_disconnect">Are you sure you want to disconnect %1$s %2$s?</string>
-    <string name="client_disconnect_success">Disconnect successful</string>
-    <string name="client_disconnect_failed">Disconnect failed</string>
     <string name="client_search_placeholder">Search MAC/hostname/IP</string>
     <string name="client_no_match">No matching results</string>
     <string name="statistics_title">Statistics</string>

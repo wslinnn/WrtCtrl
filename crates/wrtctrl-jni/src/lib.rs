@@ -483,17 +483,6 @@ pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_assocListNative(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_kickClientNative(
-    mut env: JNIEnv,
-    _class: JClass,
-    ifname: JString,
-    mac: JString,
-) -> jstring {
-    let (ifname, mac) = (jstr(&mut env, &ifname), jstr(&mut env, &mac));
-    guarded!(env, async move { client().kick_client(&ifname, &mac).await })
-}
-
-#[no_mangle]
 pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_setRadioEnabledNative(
     mut env: JNIEnv,
     _class: JClass,

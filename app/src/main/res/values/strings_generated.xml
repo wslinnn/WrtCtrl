@@ -212,10 +212,6 @@
     <string name="client_offline">离线</string>
     <string name="client_currently_visiting">正在访问</string>
     <string name="client_load_failed">加载失败</string>
-    <string name="client_tip">提示</string>
-    <string name="client_confirm_disconnect">确定要断开客户端 %1$s %2$s 吗？</string>
-    <string name="client_disconnect_success">断开成功</string>
-    <string name="client_disconnect_failed">断开失败</string>
     <string name="client_search_placeholder">搜索 MAC/主机名/IP</string>
     <string name="client_no_match">无匹配结果</string>
     <string name="statistics_title">统计</string>

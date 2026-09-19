@@ -57,7 +57,15 @@ const OVERRIDES = {
 
 // 不迁移的键（两语言都有，不触发孤儿断言，需显式丢弃；均已核实新仓库零引用）：
 // - device_list_ping_hint: "延迟为 HTTP 响应时间，仅供参考"——延迟已是真 ICMP ping，提示不再成立
-const DROP_KEYS = new Set(['device_list_ping_hint']);
+// - client_tip / client_confirm_disconnect / client_disconnect_success / client_disconnect_failed:
+//   踢人功能整体移除
+const DROP_KEYS = new Set([
+  'device_list_ping_hint',
+  'client_tip',
+  'client_confirm_disconnect',
+  'client_disconnect_success',
+  'client_disconnect_failed',
+]);
 
 const zh = JSON.parse(readFileSync(join(localeDir, 'zh-Hans.json'), 'utf8'));
 const en = JSON.parse(readFileSync(join(localeDir, 'en.json'), 'utf8'));

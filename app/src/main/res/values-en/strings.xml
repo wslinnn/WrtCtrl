@@ -22,6 +22,4 @@
     <string name="common_close">Close</string>
     <string name="common_copy">Copy</string>
     <string name="network_empty">No data</string>
-    <!-- Client page (others reuse generated keys client_*) -->
-    <string name="client_kick">Disconnect</string>
 </resources>

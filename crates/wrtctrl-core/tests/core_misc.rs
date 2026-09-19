@@ -272,25 +272,6 @@ async fn assoclist_passthrough_and_guard() {
     assert_eq!(server.received_requests().await.unwrap_or_default().len(), before);
 }
 
-/// 契约：踢下线参数（deauth+reason5+ban_time 60s，对象 hostapd.<ifname>）
-#[tokio::test]
-async fn kick_client_params() {
-    let server = MockServer::start().await;
-    Mock::given(common::UbusCall("hostapd.phy1-ap0", "del_client"))
-        .respond_with(ok_response(json!({})))
-        .mount(&server)
-        .await;
-    let client = client_to(&server, "s").await;
-
-    client.kick_client("phy1-ap0", "AA:BB:CC:00:00:01").await.unwrap();
-
-    let params = common::last_call_params(&server, "hostapd.phy1-ap0", "del_client").await;
-    assert_eq!(
-        params[3],
-        json!({"addr": "AA:BB:CC:00:00:01", "deauth": true, "reason": 5, "ban_time": 60000})
-    );
-}
-
 // ── ping 探测（ICMP 优先 + HTTP HEAD 兜底，见 ping.rs）──
 
 /// 契约：对可达目标返回毫秒数（桌面无 /system/bin/ping，实际走 HTTP 兜底；ICMP 路径由集成验收覆盖）；

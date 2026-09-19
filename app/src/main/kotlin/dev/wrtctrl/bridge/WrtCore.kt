@@ -57,7 +57,6 @@ object WrtCore {
     private external fun readDmesgNative(): String
     private external fun wirelessStatusNative(): String
     private external fun assocListNative(ifname: String): String
-    private external fun kickClientNative(ifname: String, mac: String): String
     private external fun setRadioEnabledNative(radioName: String, enabled: Boolean): String
     private external fun restartRadioNative(radioName: String): String
     private external fun pingDeviceNative(): String
@@ -168,9 +167,6 @@ object WrtCore {
 
     suspend fun wirelessStatus(): JSONObject = dataObject { wirelessStatusNative() }
     suspend fun assocList(ifname: String): JSONArray = dataArray { assocListNative(ifname) }
-    suspend fun kickClient(ifname: String, mac: String) {
-        call { kickClientNative(ifname, mac) }
-    }
 
     suspend fun setRadioEnabled(radioName: String, enabled: Boolean) {
         call { setRadioEnabledNative(radioName, enabled) }

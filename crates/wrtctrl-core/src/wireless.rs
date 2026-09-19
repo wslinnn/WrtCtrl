@@ -154,17 +154,6 @@ impl RouterClient {
         }
     }
 
-    /// 踢下线（hostapd.<ifname>.del_client）
-    pub async fn kick_client(&self, ifname: &str, mac: &str) -> Result<Value, UbusError> {
-        self.call_ubus(
-            &format!("hostapd.{ifname}"),
-            "del_client",
-            json!({"addr": mac, "deauth": true, "reason": 5, "ban_time": 60000}),
-            UCI_CALL_TIMEOUT,
-        )
-        .await
-    }
-
     /// radio 启停：device 与其下所有 wifi-iface 的 disabled 同步（OR 关系，见模块注释）
     /// + commit{rollback}；enable 时 /sbin/wifi up 兜底立即 up（失败忽略）。
     /// uci.get 失败时中止而非半写（否则只写 radio、
