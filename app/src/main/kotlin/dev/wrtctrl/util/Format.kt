@@ -1,5 +1,7 @@
 package dev.wrtctrl.util
 
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import kotlin.math.floor
 import kotlin.math.ln
@@ -61,6 +63,12 @@ object Format {
     /** 无线码率：iwinfo.bitrate 单位 kbit/s → Mbit/s 保留 1 位 */
     fun bitrate(kbitPerSec: Double): String =
         String.format(NUM, "%.1f Mbit/s", kbitPerSec / 1000.0)
+
+    /** 图表时间戳（秒级 epoch）→ HH:mm:ss。轴与 marker 共用同一实现——
+     *  禁止 `fmt::format` 方法引用：绑定 DateFormat.format(Object) 会把 Long 当毫秒，
+     *  秒级时间戳被渲染成 1970 年恒定时刻（务必避免回归） */
+    fun chartTime(tsSec: Long, fmt: SimpleDateFormat): String =
+        fmt.format(Date(tsSec * 1000))
 
     data class BandwidthSeries(
         val timestamps: MutableList<Long> = mutableListOf(),
