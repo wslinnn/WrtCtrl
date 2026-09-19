@@ -8,12 +8,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,9 +22,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -35,11 +36,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -50,12 +49,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
@@ -69,9 +66,14 @@ import com.patrykandpatrick.vico.compose.cartesian.data.CartesianChartModelProdu
 import com.patrykandpatrick.vico.compose.cartesian.data.lineModel
 import com.patrykandpatrick.vico.compose.cartesian.layer.LineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
+import com.patrykandpatrick.vico.compose.cartesian.marker.CartesianMarkerController
+import com.patrykandpatrick.vico.compose.cartesian.marker.DefaultCartesianMarker
+import com.patrykandpatrick.vico.compose.cartesian.marker.LineCartesianLayerMarkerTarget
+import com.patrykandpatrick.vico.compose.cartesian.marker.rememberDefaultCartesianMarker
 import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
 import com.patrykandpatrick.vico.compose.cartesian.rememberVicoScrollState
 import com.patrykandpatrick.vico.compose.common.Fill
+import com.patrykandpatrick.vico.compose.common.component.rememberTextComponent
 import dev.wrtctrl.R
 import dev.wrtctrl.data.DashboardCardId
 import dev.wrtctrl.util.Format
@@ -90,15 +92,23 @@ private const val TX_COLOR = 0xFF00C4CC
 private const val RX_AREA = 0x2E4FACFE
 private const val TX_AREA = 0x2800C4CC
 
+// 语义警示色（环组）：CPU/温度越限时的橙→深橙渐变，替代品牌蓝青渐变以传达健康信号
+private val WARNING_COLORS = listOf(Color(0xFFFFB300), Color(0xFFF4511E))
+
+// 越限阈值：CPU 使用率 ≥85%，温度环百分比 ≥80%（即 ≥80℃，映射区间 40–90℃）
+private const val WARNING_PERCENT = 85
+private const val TEMP_WARNING_PERCENT = 80
+
 /** 等宽数字：速率/百分比高频变化时不因数字宽度抖动带动布局跳动 */
 private const val FONT_FEATURE_TABULAR = "tnum"
 
-/** 资源监控环的一条规格：centerText 非空时环中心显示它（如温度 ℃），否则显示百分比 */
+/** 环组的一条规格：centerText 非空时环中心显示它（如温度 ℃），否则显示百分比；warning=越限警示色 */
 private data class RingSpec(
     val label: String,
     val percent: Int,
     val centerText: String?,
     val detail: String?,
+    val warning: Boolean = false,
 )
 
 /** 首页仪表盘：卡片顺序/显隐由 DashboardPrefs 驱动（编辑页配置），折叠态同库持久化（跨重启记忆）；
@@ -277,7 +287,11 @@ private fun CollapsibleCard(
         Row(
             Modifier
                 .fillMaxWidth()
-                .clickable(onClick = onToggle)
+                // onClickLabel 向无障碍服务播报动作（展开/收起），箭头为装饰性图标
+                .clickable(
+                    onClickLabel = stringResource(if (expanded) R.string.common_collapse else R.string.common_expand),
+                    onClick = onToggle,
+                )
                 .padding(horizontal = 16.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -297,10 +311,11 @@ private fun CollapsibleCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Text(
-                if (expanded) "▾" else "▸",
-                Modifier.padding(start = 8.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Icon(
+                if (expanded) Icons.Filled.ExpandMore else Icons.Filled.ExpandLess,
+                contentDescription = null,
+                modifier = Modifier.padding(start = 8.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         AnimatedVisibility(
@@ -351,12 +366,22 @@ private fun RateBlock(label: String, rate: Long, color: Color) {
 @Composable
 private fun ResourceRings(state: HomeUiState) {
     val specs = buildList {
-        state.cpuPercent?.let { add(RingSpec(stringResource(R.string.home_cpu), it, "$it%", state.load)) }
-        add(RingSpec(stringResource(R.string.home_memory), state.memoryPercent, null, state.memoryDetail))
+        state.cpuPercent?.let {
+            add(RingSpec(stringResource(R.string.home_cpu), it, "$it%", state.load, it >= WARNING_PERCENT))
+        }
+        add(
+            RingSpec(
+                stringResource(R.string.home_memory),
+                state.memoryPercent,
+                null,
+                state.memoryDetail,
+                state.memoryPercent >= WARNING_PERCENT,
+            ),
+        )
         state.tempC?.let { temp ->
             // 环弧映射：40℃=空，90℃=满（路由器结温健康区间），中心显示实际读数
             val percent = (((temp - 40) / 50.0) * 100).roundToInt().coerceIn(0, 100)
-            add(RingSpec(stringResource(R.string.home_temperature), percent, "$temp℃", null))
+            add(RingSpec(stringResource(R.string.home_temperature), percent, "$temp℃", null, percent >= TEMP_WARNING_PERCENT))
         }
     }
     Row(Modifier.fillMaxWidth()) {
@@ -367,6 +392,7 @@ private fun ResourceRings(state: HomeUiState) {
                 centerText = spec.centerText,
                 detail = spec.detail,
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                warning = spec.warning,
             )
         }
     }
@@ -403,6 +429,7 @@ private fun Ring(
     centerText: String? = null,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
+    warning: Boolean = false,
 ) {
     val animated by animateFloatAsState(
         targetValue = percent / 100f,
@@ -410,7 +437,8 @@ private fun Ring(
         label = "ring",
     )
     val track = if (isSystemInDarkTheme()) Color(0xFF2A2C31) else Color(0xFFF1F2F5)
-    val brush = Brush.linearGradient(listOf(Color(RX_COLOR), Color(TX_COLOR)))
+    // 越限（CPU/内存/温度告警阈值）切换橙红警示渐变，传达健康信号；常规为品牌蓝青
+    val brush = Brush.linearGradient(if (warning) WARNING_COLORS else listOf(Color(RX_COLOR), Color(TX_COLOR)))
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val stroke = size.minDimension * 0.11f
@@ -461,6 +489,7 @@ private fun RingColumn(
     centerText: String?,
     detail: String?,
     modifier: Modifier = Modifier,
+    warning: Boolean = false,
 ) {
     Column(
         modifier.fillMaxWidth(),
@@ -472,6 +501,7 @@ private fun RingColumn(
             centerText = centerText,
             modifier = Modifier.fillMaxWidth().aspectRatio(1f),
             compact = true,
+            warning = warning,
         )
         if (!detail.isNullOrBlank()) {
             Spacer(Modifier.height(8.dp))
@@ -485,9 +515,10 @@ private fun RingColumn(
     }
 }
 
-/** 实时带宽双折线（Vico 2.1）：rx/tx 两条线 + 坐标轴。
- *  查值不用 Vico 触摸 marker（抬手即隐），自制点击常显浮层：tap 换算最近采样点，
- *  竖直参考线 + 顶部时间/入站/出站浮层；再点切换，点同一点取消。
+/** 实时带宽双折线（Vico 3.3.1）：rx/tx 两条线 + 坐标轴 + 点击查值。
+ *  查值用 Vico 原生 marker（ToggleOnTap：点按显示、再点隐藏；guideline 与圆点由库绘制），
+ *  命中测试/滚动/轴宽换算全部由库完成——自制浮层的像素反推索引忽略了 Y 轴占宽与滚动偏移，
+ *  是「横坐标时间与查值时间不一致」的根因。
  *  空序列守卫：Vico 对空 series 直接 require 崩溃（闪退根因），首份差分产出前显示占位。 */
 @Composable
 private fun BandwidthChart(
@@ -506,11 +537,8 @@ private fun BandwidthChart(
             }
         }
     }
-    var selectedIndex by remember { mutableIntStateOf(-1) }
-    val currentRx by rememberUpdatedState(rx)
-    val currentTx by rememberUpdatedState(tx)
-    // X 轴 formatter 捕获此 State（身份稳定）而非 timestamps 实例：列表每 3s 换新引用，
-    // 轴不会跟着重建（与 lineProvider remember 同理——配置常驻，数据只走 producer）
+    // X 轴 formatter 与 marker 标签都经此 State 间接读时间戳：列表每 3s 换新引用，
+    // lambda 身份保持稳定，轴/标记不会跟着重建（配置常驻，数据只走 producer）
     val currentTs by rememberUpdatedState(timestamps)
     Box(modifier) {
         if (rx.isEmpty()) {
@@ -541,6 +569,25 @@ private fun BandwidthChart(
             val inbound = stringResource(R.string.statistics_inbound)
             val outbound = stringResource(R.string.statistics_outbound)
             val timeFmt = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+            // 查值标记：标签三行 = 时间 / 入站 / 出站（值取自 Vico 命中的采样点，天然对齐）。
+            // rememberTextComponent 默认 lineCount=1，多行标签会被截断成「时间..」（v2/v3 同坑）
+            val marker = rememberDefaultCartesianMarker(
+                label = rememberTextComponent(lineCount = 3),
+                valueFormatter = { _, targets ->
+                    val lineTarget = targets.filterIsInstance<LineCartesianLayerMarkerTarget>().firstOrNull()
+                    val idx = lineTarget?.x?.roundToInt()
+                    buildString {
+                        append(idx?.let { i -> currentTs.getOrNull(i)?.let(timeFmt::format) } ?: "")
+                        lineTarget?.points?.getOrNull(0)?.entry?.y?.let { y ->
+                            append("\n$inbound: ").append(Format.rate(y.roundToLong()))
+                        }
+                        lineTarget?.points?.getOrNull(1)?.entry?.y?.let { y ->
+                            append("\n$outbound: ").append(Format.rate(y.roundToLong()))
+                        }
+                    }
+                },
+                labelPosition = DefaultCartesianMarker.LabelPosition.AroundPoint,
+            )
             // 默认视口停在最右（最新数据），新点到来自动跟随（OnModelGrowth）
             val scrollState = rememberVicoScrollState(
                 initialScroll = Scroll.Absolute.End,
@@ -559,55 +606,13 @@ private fun BandwidthChart(
                             currentTs.getOrNull(idx)?.let { timeFmt.format(Date(it * 1000)) } ?: ""
                         },
                     ),
+                    marker = marker,
+                    markerController = CartesianMarkerController.rememberToggleOnTap(),
                 ),
                 modelProducer = modelProducer,
                 scrollState = scrollState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTapGestures { offset ->
-                            val list = currentRx
-                            if (list.isEmpty()) return@detectTapGestures
-                            val idx = (offset.x / size.width * (list.size - 1)).roundToInt().coerceIn(0, list.size - 1)
-                            selectedIndex = if (selectedIndex == idx) -1 else idx
-                        }
-                    },
+                modifier = Modifier.fillMaxSize(),
             )
-            val idx = selectedIndex
-            if (idx in currentRx.indices) {
-                // 竖直参考线（底部让出 X 轴标签区）
-                Canvas(Modifier.matchParentSize()) {
-                    val span = (currentRx.size - 1).coerceAtLeast(1)
-                    val x = size.width * idx / span
-                    drawLine(
-                        color = Color(0x66888888),
-                        start = Offset(x, 0f),
-                        end = Offset(x, size.height - 24.dp.toPx()),
-                        strokeWidth = 1.dp.toPx(),
-                    )
-                }
-                val time = currentTs.getOrNull(idx)?.let { timeFmt.format(Date(it * 1000)) } ?: ""
-                Column(
-                    Modifier
-                        .align(Alignment.TopCenter)
-                        .background(Color(0xCC202124), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                ) {
-                    if (time.isNotBlank()) {
-                        Text(time, color = Color(0xFF9CA3AF), fontSize = 10.sp)
-                    }
-                    Text(
-                        "${inbound}: ${Format.rate(currentRx[idx].roundToLong())}",
-                        color = Color(RX_COLOR),
-                        fontSize = 11.sp,
-                    )
-                    Text(
-                        "${outbound}: ${Format.rate(currentTx[idx].roundToLong())}",
-                        color = Color(TX_COLOR),
-                        fontSize = 11.sp,
-                    )
-                }
-            }
         }
     }
 }

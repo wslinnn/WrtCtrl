@@ -224,11 +224,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             tx = tx.takeLast(60).toMutableList()
             ts = ts.takeLast(60).toMutableList()
         }
+        // 时间戳锚定到设备墙钟：luci 实时统计的 ts 语义随固件而异（epoch / 路由 uptime），
+        // 但都按真实秒推进——用「最后一次采样 ≈ 本次拉取时刻」线性平移，X 轴与查值标记
+        // 的时间对一切语义都正确（若本就是 epoch，偏移仅为网络延迟，无影响）
+        val wallNowSec = System.currentTimeMillis() / 1000
+        val shiftSec = wallNowSec - ts.last()
+        val wallTs = ts.map { it + shiftSec }
         _state.update {
             it.copy(
                 rxSeries = rx.toList(),
                 txSeries = tx.toList(),
-                timestamps = ts.toList(),
+                timestamps = wallTs,
                 rxRate = rx.last().roundToLong(),
                 txRate = tx.last().roundToLong(),
                 bandwidthSource = source,

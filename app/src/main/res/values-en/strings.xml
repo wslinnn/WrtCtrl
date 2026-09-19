@@ -15,4 +15,7 @@
     <string name="theme_follow_system">Follow system</string>
     <string name="theme_dark">Dark</string>
     <string name="theme_light">Light</string>
+    <!-- Collapsible header semantics (a11y) -->
+    <string name="common_expand">Expand</string>
+    <string name="common_collapse">Collapse</string>
 </resources>
