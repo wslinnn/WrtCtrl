@@ -32,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -56,6 +57,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
 import com.patrykandpatrick.vico.compose.cartesian.AutoScrollCondition
 import com.patrykandpatrick.vico.compose.cartesian.Scroll
@@ -98,11 +102,24 @@ private data class RingSpec(
 )
 
 /** 首页仪表盘：卡片顺序/显隐由 DashboardPrefs 驱动（编辑页配置），折叠态同库持久化（跨重启记忆）；
- *  下拉刷新立即补一轮拉取（与 3s 自动轮询并存） */
+ *  下拉刷新立即补一轮拉取（与 3s 自动轮询并存）；轮询随页面可见性启停。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(vm: HomeViewModel, modifier: Modifier = Modifier) {
     val state by vm.state.collectAsStateWithLifecycle()
+    // 页面不可见（息屏/退后台/切到覆盖页）即停轮询，回到前台立即恢复
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> vm.setPollingActive(true)
+                Lifecycle.Event.ON_PAUSE -> vm.setPollingActive(false)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     if (state.loading) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(
@@ -512,12 +529,12 @@ private fun BandwidthChart(
                     LineCartesianLayer.Line(
                         fill = LineCartesianLayer.LineFill.single(Fill(Color(RX_COLOR))),
                         areaFill = LineCartesianLayer.AreaFill.single(Fill(Color(RX_AREA))),
-                        pointConnector = LineCartesianLayer.PointConnector.cubic(),
+                        interpolator = LineCartesianLayer.Interpolator.cubic(),
                     ),
                     LineCartesianLayer.Line(
                         fill = LineCartesianLayer.LineFill.single(Fill(Color(TX_COLOR))),
                         areaFill = LineCartesianLayer.AreaFill.single(Fill(Color(TX_AREA))),
-                        pointConnector = LineCartesianLayer.PointConnector.cubic(),
+                        interpolator = LineCartesianLayer.Interpolator.cubic(),
                     ),
                 )
             }

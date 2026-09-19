@@ -51,12 +51,16 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import java.io.File
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import androidx.appcompat.app.AppCompatDelegate
 import dev.wrtctrl.R
+import dev.wrtctrl.data.ThemeMode
+import dev.wrtctrl.data.ThemePrefs
 import dev.wrtctrl.ui.screen.DashboardEditScreen
 import dev.wrtctrl.ui.screen.DeviceGateScreen
 import dev.wrtctrl.ui.screen.HomeScreen
 import dev.wrtctrl.ui.screen.LanguageAction
 import dev.wrtctrl.ui.screen.LanguageScreen
+import dev.wrtctrl.ui.screen.ThemeAction
 import dev.wrtctrl.viewmodel.AppViewModel
 import dev.wrtctrl.viewmodel.HomeViewModel
 import dev.wrtctrl.viewmodel.Phase
@@ -80,6 +84,18 @@ fun AppRoot() {
     var showLanguage by remember { mutableStateOf(false) }
     val context = LocalContext.current
     var crashText by remember { mutableStateOf<String?>(null) }
+    // 深浅色三态全局生效：ThemeAction 只写偏好，这里集中驱动 AppCompatDelegate
+    val themePrefs = remember { ThemePrefs(app.applicationContext) }
+    val themeMode by themePrefs.modeFlow().collectAsStateWithLifecycle(ThemeMode.FOLLOW_SYSTEM)
+    LaunchedEffect(themeMode) {
+        AppCompatDelegate.setDefaultNightMode(
+            when (themeMode) {
+                ThemeMode.FOLLOW_SYSTEM -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+                ThemeMode.DARK -> AppCompatDelegate.MODE_NIGHT_YES
+                ThemeMode.LIGHT -> AppCompatDelegate.MODE_NIGHT_NO
+            },
+        )
+    }
     LaunchedEffect(Unit) {
         val file = File(context.filesDir, "last_crash.txt")
         if (file.exists()) crashText = runCatching { file.readText() }.getOrNull()
@@ -163,6 +179,7 @@ private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
                     IconButton(onClick = { vm.openDeviceList(fromMain = true) }) {
                         Icon(Icons.Filled.Devices, contentDescription = stringResource(R.string.device_list_history_title))
                     }
+                    ThemeAction()
                     LanguageAction(onOpenLanguage)
                 },
             )

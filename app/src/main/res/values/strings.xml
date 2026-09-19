@@ -13,4 +13,8 @@
     <string name="dashboard_edit_hint">长按拖拽调整顺序，开关控制显示</string>
     <!-- 首页：无 IPv4 降级文案（home_cpu 复用生成键；下拉刷新） -->
     <string name="home_no_ipv4">无 IPv4</string>
+    <!-- 深浅色三态切换 -->
+    <string name="theme_follow_system">跟随系统</string>
+    <string name="theme_dark">深色</string>
+    <string name="theme_light">浅色</string>
 </resources>

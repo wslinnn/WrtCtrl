@@ -11,4 +11,8 @@
     <string name="dashboard_edit_hint">Long-press and drag to reorder; toggle to show or hide</string>
     <!-- Home round 2: degradation copy (home_cpu reuses generated key; timestamp replaced by pull-to-refresh) -->
     <string name="home_no_ipv4">No IPv4</string>
+    <!-- Theme three-state toggle -->
+    <string name="theme_follow_system">Follow system</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_light">Light</string>
 </resources>

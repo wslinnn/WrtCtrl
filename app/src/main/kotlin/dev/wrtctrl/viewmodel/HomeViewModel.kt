@@ -17,6 +17,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -78,12 +79,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private var bandwidthDevice: String? = null
     private val dashboardPrefs = DashboardPrefs(application)
 
+    /** 轮询开关（B1 完整落地）：页面可见才轮询；用 StateFlow 让挂起的循环能被唤醒 */
+    private val pollingActive = MutableStateFlow(true)
+
+    fun setPollingActive(active: Boolean) {
+        pollingActive.value = active
+    }
+
     init {
         viewModelScope.launch {
-            pollOnce()
             while (viewModelScope.isActive) {
-                delay(3000)
+                // 不可见时在此挂起（不占任何资源），回到可见立即拉一轮
+                pollingActive.first { it }
                 pollOnce()
+                delay(3000)
             }
         }
         viewModelScope.launch {

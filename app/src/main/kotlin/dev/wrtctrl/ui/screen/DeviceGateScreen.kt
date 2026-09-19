@@ -21,9 +21,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.BrightnessAuto
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -55,10 +58,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -66,11 +71,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.wrtctrl.R
 import dev.wrtctrl.data.Device
+import dev.wrtctrl.data.ThemeMode
+import dev.wrtctrl.data.ThemePrefs
 import dev.wrtctrl.viewmodel.AppViewModel
 import dev.wrtctrl.viewmodel.GateMode
 import dev.wrtctrl.viewmodel.GateUiState
+import kotlinx.coroutines.launch
 
 /** 设备门控页（双形态）：列表（直连/编辑/删除）+ 添加·编辑表单。*/
 @Composable
@@ -95,6 +104,32 @@ internal fun LanguageAction(onOpenLanguage: () -> Unit) {
     }
 }
 
+/// 深浅色三态切换入口：跟随系统 → 深色 → 浅色 循环；持久化由 ThemePrefs 承担，
+/// 全局生效（AppCompatDelegate）由 WrtApp 启动恢复 + AppRoot flow 收集驱动。
+@Composable
+internal fun ThemeAction() {
+    val context = LocalContext.current
+    val prefs = remember { ThemePrefs(context.applicationContext) }
+    val scope = rememberCoroutineScope()
+    val mode by prefs.modeFlow().collectAsStateWithLifecycle(ThemeMode.FOLLOW_SYSTEM)
+    IconButton(onClick = { scope.launch { prefs.save(ThemePrefs.next(mode)) } }) {
+        Icon(
+            when (mode) {
+                ThemeMode.FOLLOW_SYSTEM -> Icons.Filled.BrightnessAuto
+                ThemeMode.DARK -> Icons.Filled.DarkMode
+                ThemeMode.LIGHT -> Icons.Filled.LightMode
+            },
+            contentDescription = stringResource(
+                when (mode) {
+                    ThemeMode.FOLLOW_SYSTEM -> R.string.theme_follow_system
+                    ThemeMode.DARK -> R.string.theme_dark
+                    ThemeMode.LIGHT -> R.string.theme_light
+                },
+            ),
+        )
+    }
+}
+
 // ── 列表形态 ──
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -105,7 +140,10 @@ private fun ListMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () ->
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.device_list_history_title)) },
-                actions = { LanguageAction(onOpenLanguage) },
+                actions = {
+                    ThemeAction()
+                    LanguageAction(onOpenLanguage)
+                },
             )
         },
         floatingActionButton = {
@@ -315,7 +353,10 @@ private fun FormMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () ->
                         }
                     }
                 },
-                actions = { LanguageAction(onOpenLanguage) },
+                actions = {
+                    ThemeAction()
+                    LanguageAction(onOpenLanguage)
+                },
             )
         },
     ) { padding ->
