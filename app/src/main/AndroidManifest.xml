@@ -2,6 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- 路由器管理走内网 http(s) 直连；Android 9+ 默认禁明文，此 app 的首要场景即 http://192.168.x.1，显式放行 -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- NetBinder 枚举在册网络与链路地址：无互联网 WiFi 的私网目标需显式 bindProcessToNetwork -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Android 16 LNP：targetSdk≥36 访问局域网（192.168.x.x 等）必须持有「附近的设备」权限，
+         过渡期挂靠 NEARBY_WIFI_DEVICES，未授权时 SYN 被静默黑洞（连接超时） -->
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
 
     <application
         android:name=".WrtApp"

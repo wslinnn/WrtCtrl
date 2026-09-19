@@ -1,6 +1,8 @@
 package dev.wrtctrl.ui.screen
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -72,10 +74,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.Manifest
 import dev.wrtctrl.R
 import dev.wrtctrl.data.Device
 import dev.wrtctrl.data.ThemeMode
 import dev.wrtctrl.data.ThemePrefs
+import dev.wrtctrl.net.LocalNetPermission
 import dev.wrtctrl.viewmodel.AppViewModel
 import dev.wrtctrl.viewmodel.GateMode
 import dev.wrtctrl.viewmodel.GateUiState
@@ -136,6 +140,12 @@ internal fun ThemeAction() {
 @Composable
 private fun ListMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () -> Unit) {
     var deleting by remember { mutableStateOf<Device?>(null) }
+    val context = LocalContext.current
+    // LNP 授权后再续行被中断的直连；拒绝授权也继续——失败横幅/错误卡自会呈现
+    var pendingConnect by remember { mutableStateOf<Device?>(null) }
+    val localNetPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { pendingConnect?.let(vm::connectTo) }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -191,7 +201,14 @@ private fun ListMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () ->
                             pingDetecting = device.id !in state.pings,
                             isCurrent = vm.current.value?.id == device.id,
                             connecting = state.connecting,
-                            onClick = { vm.connectTo(device) },
+                            onClick = {
+                                if (LocalNetPermission.needsRequest(context, device.host)) {
+                                    pendingConnect = device
+                                    localNetPermission.launch(Manifest.permission.NEARBY_WIFI_DEVICES)
+                                } else {
+                                    vm.connectTo(device)
+                                }
+                            },
                             onEdit = { vm.openForm(device) },
                             onDelete = { deleting = device },
                         )
@@ -330,6 +347,11 @@ private fun FormMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () ->
     var showPassword by remember { mutableStateOf(false) }
     val passwordFocus = remember { FocusRequester() }
     val scroll = rememberScrollState()
+    val context = LocalContext.current
+    // LNP 授权（无论允许/拒绝）后再发起连接——授权前的连接必然被黑洞
+    val localNetPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { vm.submit() }
 
     // 认证失败 → 自动聚焦密码框
     LaunchedEffect(state.formErrorCode) {
@@ -452,7 +474,13 @@ private fun FormMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () ->
             }
 
             Button(
-                onClick = { vm.submit() },
+                onClick = {
+                    if (LocalNetPermission.needsRequest(context, state.form.host)) {
+                        localNetPermission.launch(Manifest.permission.NEARBY_WIFI_DEVICES)
+                    } else {
+                        vm.submit()
+                    }
+                },
                 enabled = !state.connecting,
                 modifier = Modifier.fillMaxWidth().height(48.dp),
             ) {

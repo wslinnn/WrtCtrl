@@ -12,6 +12,7 @@ import dev.wrtctrl.bridge.CoreException
 import dev.wrtctrl.bridge.WrtCore
 import dev.wrtctrl.data.Device
 import dev.wrtctrl.data.DeviceRepository
+import dev.wrtctrl.net.NetBinder
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -103,6 +104,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 连接并校验会话：探活失败自动用存储凭证重登 */
     private suspend fun activate(device: Device): Boolean = try {
+        // LAN 目标先绑定覆盖网络再连接（默认网络可能不覆盖私网段，见 NetBinder 注释）
+        android.util.Log.i("wrtctrl", "netbind: ${NetBinder.bindForHost(getApplication(), device.host)}")
         WrtCore.setDevice(device.baseUrl, device.username, device.password, null)
         WrtCore.reconnect()
         _current.value = device
@@ -265,17 +268,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(fieldErrors = emptyMap(), connecting = true, formErrorText = null, formErrorCode = null, formErrorDetail = null)
         }
         viewModelScope.launch {
+            val editingId = _gate.value.editingId
+            val device = Device(
+                id = editingId ?: UUID.randomUUID().toString(),
+                name = form.name,
+                host = form.host,
+                port = checkedPort,
+                useHttps = form.useHttps,
+                username = form.username,
+                password = form.password,
+            )
+            // 绑定失败绝不阻断登录（返回描述串进错误卡诊断）；声明在 try 外供 catch 读取
+            val netDesc = try {
+                NetBinder.bindForHost(getApplication(), device.host)
+            } catch (e: Exception) {
+                "binder error: ${e.message}"
+            }
             try {
-                val editingId = _gate.value.editingId
-                val device = Device(
-                    id = editingId ?: UUID.randomUUID().toString(),
-                    name = form.name,
-                    host = form.host,
-                    port = checkedPort,
-                    useHttps = form.useHttps,
-                    username = form.username,
-                    password = form.password,
-                )
                 WrtCore.setDevice(device.baseUrl, device.username, device.password, null)
                 WrtCore.login()
                 if (editingId != null && repo.get(editingId) != null) {
@@ -306,7 +315,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         connecting = false,
                         formErrorText = str(textRes),
                         formErrorCode = e.code,
-                        formErrorDetail = e.message,
+                        formErrorDetail = e.message.orEmpty() + "\nnet: $netDesc",
                     )
                 }
             } catch (e: CancellationException) {
@@ -318,7 +327,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         connecting = false,
                         formErrorText = str(R.string.device_list_error_other),
                         formErrorCode = "other",
-                        formErrorDetail = e.message,
+                        formErrorDetail = e.message.orEmpty() + "\nnet: $netDesc",
                     )
                 }
             }

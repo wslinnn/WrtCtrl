@@ -23,7 +23,10 @@ android {
     defaultConfig {
         applicationId = "dev.wrtctrl.app"
         minSdk = 29
-        targetSdk = 37
+        // Android 16 LNP：targetSdk ≥36 访问私网需本地网络权限；部分 ROM 强制但本地网络权限形态不同，不认
+        // NEARBY_WIFI_DEVICES 授权，故钉在豁免边界 35。
+        // 切回 37 的条件：ROM 提供本地网络开关或 Android 专属权限落地（切回前需逐项确认）
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
     }
