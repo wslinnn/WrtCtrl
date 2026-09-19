@@ -78,6 +78,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private var bandwidthDevice: String? = null
     private val dashboardPrefs = DashboardPrefs(application)
+    private var loadedDeviceId: String? = null
+
+    /** 切换设备：重置回 loading 过渡态（与进 app 一致）并立即补一轮拉取——
+     *  否则旧设备数据要挂到下个 3s 轮询节拍才被新数据覆盖，观感是"变化很慢"。
+     *  卡片自定义三件套（顺序/显隐/折叠）跨设备保留 */
+    fun switchDevice(deviceId: String?) {
+        if (deviceId == loadedDeviceId) return
+        loadedDeviceId = deviceId
+        bandwidthDevice = null
+        _state.update {
+            HomeUiState(cardOrder = it.cardOrder, cardEnabled = it.cardEnabled, collapsed = it.collapsed)
+        }
+        viewModelScope.launch { pollOnce() }
+    }
 
     /** 轮询开关（B1 完整落地）：页面可见才轮询；用 StateFlow 让挂起的循环能被唤醒 */
     private val pollingActive = MutableStateFlow(true)

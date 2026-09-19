@@ -37,8 +37,10 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -534,7 +536,11 @@ private fun BandwidthChart(
     modifier: Modifier = Modifier,
 ) {
     val modelProducer = remember { CartesianChartModelProducer() }
-    LaunchedEffect(rx, tx) {
+    // 图表时间戳与模型严格同帧对齐：runTransaction 完成后才更新 chartTs——
+    // 若直接读 state.timestamps，切设备的过渡帧会出现"模型 60 点/时间戳短列表"错配，
+    // 轴格式化查不到索引返回空串，Vico 3 对空串标签直接抛 IllegalStateException（务必避免回归）
+    var chartTs by remember { mutableStateOf<List<Long>>(emptyList()) }
+    LaunchedEffect(rx, tx, timestamps) {
         if (rx.isEmpty() || tx.isEmpty()) return@LaunchedEffect
         modelProducer.runTransaction {
             lineModel {
@@ -542,10 +548,11 @@ private fun BandwidthChart(
                 series(tx)
             }
         }
+        chartTs = timestamps
     }
-    // X 轴 formatter 与 marker 标签都经此 State 间接读时间戳：列表每 3s 换新引用，
-    // lambda 身份保持稳定，轴/标记不会跟着重建（配置常驻，数据只走 producer）
-    val currentTs by rememberUpdatedState(timestamps)
+    // X 轴 formatter 与 marker 标签都经此 State 间接读时间戳：lambda 身份保持稳定
+    // （配置常驻，数据只走 producer）。Vico 3 禁止轴标签空串，兜底 "--"。
+    val currentTs by rememberUpdatedState(chartTs)
     Box(modifier) {
         if (rx.isEmpty()) {
             Text(
@@ -583,7 +590,7 @@ private fun BandwidthChart(
                     val lineTarget = targets.filterIsInstance<LineCartesianLayerMarkerTarget>().firstOrNull()
                     val idx = lineTarget?.x?.roundToInt()
                     buildString {
-                        append(idx?.let { i -> currentTs.getOrNull(i)?.let { formatChartTime(it, timeFmt) } } ?: "")
+                        append(idx?.let { i -> currentTs.getOrNull(i)?.let { formatChartTime(it, timeFmt) } } ?: "--")
                         lineTarget?.points?.getOrNull(0)?.entry?.y?.let { y ->
                             append("\n$inbound: ").append(Format.rate(y.roundToLong()))
                         }
@@ -609,7 +616,7 @@ private fun BandwidthChart(
                     bottomAxis = HorizontalAxis.rememberBottom(
                         valueFormatter = { _, value, _ ->
                             val idx = value.roundToInt()
-                            currentTs.getOrNull(idx)?.let { formatChartTime(it, timeFmt) } ?: ""
+                            currentTs.getOrNull(idx)?.let { formatChartTime(it, timeFmt) } ?: "--"
                         },
                     ),
                     marker = marker,

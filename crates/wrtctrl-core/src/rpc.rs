@@ -136,6 +136,16 @@ impl RouterClient {
         let (status, payload) = tokio::time::timeout(timeout, fut)
             .await
             .map_err(|_| UbusError::Timeout)??;
+        // JSON-RPC 错误信封（对象/方法不存在、权限拒绝等 rpcd 拒绝路径）没有 result
+        // 字段——先于"缺 result 数组"报出真实原因，否则踢人等调用只会得到笼统的
+        // invalid response
+        if let Some(err) = payload.get("error").and_then(|e| e.as_object()) {
+            let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or_default();
+            let message = err.get("message").and_then(|m| m.as_str()).unwrap_or("unknown");
+            return Err(UbusError::InvalidResponse(format!(
+                "jsonrpc error {code}: {message} (http {status})"
+            )));
+        }
         let result = payload
             .get("result")
             .and_then(|r| r.as_array())

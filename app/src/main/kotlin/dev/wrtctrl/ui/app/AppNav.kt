@@ -1,6 +1,7 @@
 package dev.wrtctrl.ui.app
 
 import android.app.Application
+import android.widget.Toast
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,8 +44,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -55,6 +58,7 @@ import androidx.appcompat.app.AppCompatDelegate
 import dev.wrtctrl.R
 import dev.wrtctrl.data.ThemeMode
 import dev.wrtctrl.data.ThemePrefs
+import dev.wrtctrl.ui.screen.ClientScreen
 import dev.wrtctrl.ui.screen.DashboardEditScreen
 import dev.wrtctrl.ui.screen.DeviceGateScreen
 import dev.wrtctrl.ui.screen.HomeScreen
@@ -63,6 +67,7 @@ import dev.wrtctrl.ui.screen.LanguageScreen
 import dev.wrtctrl.ui.screen.NetworkScreen
 import dev.wrtctrl.ui.screen.ThemeAction
 import dev.wrtctrl.viewmodel.AppViewModel
+import dev.wrtctrl.viewmodel.ClientViewModel
 import dev.wrtctrl.viewmodel.HomeViewModel
 import dev.wrtctrl.viewmodel.NetworkViewModel
 import dev.wrtctrl.viewmodel.Phase
@@ -85,6 +90,7 @@ fun AppRoot() {
     val phase by vm.phase.collectAsStateWithLifecycle()
     var showLanguage by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     var crashText by remember { mutableStateOf<String?>(null) }
     // 深浅色三态全局生效：ThemeAction 只写偏好，这里集中驱动 AppCompatDelegate
     val themePrefs = remember { ThemePrefs(app.applicationContext) }
@@ -144,6 +150,18 @@ fun AppRoot() {
                                 color = MaterialTheme.colorScheme.onErrorContainer,
                             )
                         }
+                        // 一键复制崩溃堆栈（无 adb 环境，靠用户回传排障）
+                        TextButton(onClick = {
+                            crashText?.let {
+                                clipboard.setText(AnnotatedString(it))
+                                Toast.makeText(context, context.getString(R.string.common_copied), Toast.LENGTH_SHORT).show()
+                            }
+                        }) {
+                            Text(
+                                stringResource(R.string.common_copy),
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                            )
+                        }
                     }
                     Text(
                         crash,
@@ -169,8 +187,13 @@ private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
     val networkVm: NetworkViewModel = viewModel(
         factory = viewModelFactory { initializer { NetworkViewModel(app) } }
     )
+    val clientVm: ClientViewModel = viewModel(
+        factory = viewModelFactory { initializer { ClientViewModel(app) } }
+    )
     // 网络页按当前设备失效缓存（切设备重拉）
     val currentDevice by vm.current.collectAsStateWithLifecycle()
+    // 首页切设备：重置过渡态 + 立即拉取（不带上份设备数据等下个轮询节拍）
+    LaunchedEffect(currentDevice?.id) { homeVm.switchDevice(currentDevice?.id) }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -214,6 +237,7 @@ private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
                         HomeScreen(homeVm, Modifier.fillMaxSize())
                     }
                 }
+                2 -> ClientScreen(clientVm, currentDevice?.id, Modifier.fillMaxSize())
                 3 -> NetworkScreen(networkVm, currentDevice?.id, Modifier.fillMaxSize())
                 else -> PlaceholderText(stringResource(TABS[selected].labelRes), Modifier.fillMaxSize())
             }
