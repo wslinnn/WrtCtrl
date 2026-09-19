@@ -48,6 +48,11 @@ const OVERRIDES = {
     zh: '网络信息',
     en: 'Network info',
   },
+  // 「连接数」实为 conntrack 会话数（当前/上限），改名避免误读为在线设备数
+  home_connections: {
+    zh: 'NAT 会话',
+    en: 'NAT sessions',
+  },
 };
 
 // 不迁移的键（两语言都有，不触发孤儿断言，需显式丢弃；均已核实新仓库零引用）：

@@ -122,7 +122,7 @@
     <string name="home_memory">Memory</string>
     <string name="home_resource_monitor">Resource Monitor</string>
     <string name="home_memory_cache">Memory Cache</string>
-    <string name="home_connections">Connections</string>
+    <string name="home_connections">NAT sessions</string>
     <string name="home_network_status">Network info</string>
     <string name="home_wan_ip">WAN</string>
     <string name="home_lan_ip">LAN</string>
