@@ -35,6 +35,8 @@ class AppsViewModel(application: Application) : AndroidViewModel(application) {
     private var loadedDeviceId: String? = null
     private var generation = 0
 
+    /** deviceId=null 时初始 loadedDeviceId 与之相等直接跳过、loading 停留 true：
+     *  当前状态机 Main 相必有 current 设备故不可达；复用本页到他处前需先保证非空 */
     fun ensureLoaded(deviceId: String?) {
         if (deviceId != loadedDeviceId) {
             loadedDeviceId = deviceId
@@ -45,7 +47,8 @@ class AppsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refresh() {
-        if (_state.value.refreshing) return
+        // 首载探测进行中不叠加刷新：probe 无互斥，双跑 = 8 路 uciGet 翻倍
+        if (_state.value.loading || _state.value.refreshing) return
         viewModelScope.launch {
             _state.update { it.copy(refreshing = true) }
             val startedAt = android.os.SystemClock.elapsedRealtime()
