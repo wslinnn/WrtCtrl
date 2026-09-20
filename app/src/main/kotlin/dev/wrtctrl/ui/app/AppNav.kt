@@ -58,6 +58,7 @@ import androidx.appcompat.app.AppCompatDelegate
 import dev.wrtctrl.R
 import dev.wrtctrl.data.ThemeMode
 import dev.wrtctrl.data.ThemePrefs
+import dev.wrtctrl.ui.screen.AppsScreen
 import dev.wrtctrl.ui.screen.ClientScreen
 import dev.wrtctrl.ui.screen.DashboardEditScreen
 import dev.wrtctrl.ui.screen.DeviceGateScreen
@@ -68,6 +69,7 @@ import dev.wrtctrl.ui.screen.NetworkScreen
 import dev.wrtctrl.ui.screen.StatisticsScreen
 import dev.wrtctrl.ui.screen.ThemeAction
 import dev.wrtctrl.viewmodel.AppViewModel
+import dev.wrtctrl.viewmodel.AppsViewModel
 import dev.wrtctrl.viewmodel.ClientViewModel
 import dev.wrtctrl.viewmodel.HomeViewModel
 import dev.wrtctrl.viewmodel.NetworkViewModel
@@ -195,6 +197,9 @@ private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
     val statisticsVm: StatisticsViewModel = viewModel(
         factory = viewModelFactory { initializer { StatisticsViewModel(app) } }
     )
+    val appsVm: AppsViewModel = viewModel(
+        factory = viewModelFactory { initializer { AppsViewModel(app) } }
+    )
     // 网络页按当前设备失效缓存（切设备重拉）
     val currentDevice by vm.current.collectAsStateWithLifecycle()
     // 首页切设备：重置过渡态 + 立即拉取（不带上份设备数据等下个轮询节拍）
@@ -245,15 +250,8 @@ private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
                 1 -> StatisticsScreen(statisticsVm, currentDevice?.id, Modifier.fillMaxSize())
                 2 -> ClientScreen(clientVm, currentDevice?.id, Modifier.fillMaxSize())
                 3 -> NetworkScreen(networkVm, currentDevice?.id, Modifier.fillMaxSize())
-                else -> PlaceholderText(stringResource(TABS[selected].labelRes), Modifier.fillMaxSize())
+                else -> AppsScreen(appsVm, currentDevice?.id, Modifier.fillMaxSize())
             }
         }
-    }
-}
-
-@Composable
-private fun PlaceholderText(text: String, modifier: Modifier = Modifier) {
-    Box(modifier, contentAlignment = Alignment.Center) {
-        Text(text, style = MaterialTheme.typography.headlineSmall)
     }
 }
