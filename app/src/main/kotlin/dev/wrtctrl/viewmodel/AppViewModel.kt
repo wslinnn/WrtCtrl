@@ -114,6 +114,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         android.util.Log.i("wrtctrl", "netbind: $netDesc")
         WrtCore.setDevice(device.baseUrl, device.username, device.password, null)
         WrtCore.reconnect()
+        // 持久化「最近连接的设备」：此前只有表单提交路径写 setCurrent，列表直连不落盘——
+        // 重启自动重连读到的永远是表单时代的旧设备，表现为每次冷启动都重连失败进列表
+        repo.setCurrent(device.id)
         _current.value = device
         true
     } catch (e: CoreException) {
