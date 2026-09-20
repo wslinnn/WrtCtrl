@@ -8,7 +8,7 @@ import org.junit.Test
 /** 应用中心注册表纯函数：可见性判定与分组（对齐 LuCI 应用列表） */
 class AppRegistryTest {
 
-    private val ids: (List<AppDisplay>) -> List<String> = { list -> list.map { it.entry.id } }
+    private val ids: (List<AppItem>) -> List<String> = { list -> list.map { it.id } }
 
     @Test
     fun `tools always visible regardless of probe result`() {
@@ -55,9 +55,6 @@ class AppRegistryTest {
         assertFalse(ids(all).contains("passwall2"))
         assertFalse(AppRegistry.probeConfigs.contains("passwall2"))
         // proxy 组不复存在
-        AppGroupId.entries.forEach { group ->
-            assertTrue(group != AppGroupId.NETWORK || true)
-        }
         assertFalse(AppGroupId.entries.any { it.name == "PROXY" })
     }
 

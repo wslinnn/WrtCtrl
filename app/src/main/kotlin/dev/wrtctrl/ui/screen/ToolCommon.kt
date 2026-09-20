@@ -190,7 +190,7 @@ fun ToolRouter(toolId: String, deviceId: String?, onBack: () -> Unit, onSessionL
 }
 
 /** id 是否为已实装工具页（应用中心点击分流用） */
-fun isToolId(id: String): Boolean = AppRegistry.tools.any { it.entry.id == id }
+fun isToolId(id: String): Boolean = AppRegistry.tools.any { it.id == id }
 
 /** 统一的列表容器 padding */
 internal val ToolListPadding = PaddingValues(16.dp)

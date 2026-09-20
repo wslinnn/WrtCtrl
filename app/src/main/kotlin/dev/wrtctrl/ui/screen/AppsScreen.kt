@@ -59,8 +59,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.wrtctrl.R
-import dev.wrtctrl.viewmodel.AppDisplay
 import dev.wrtctrl.viewmodel.AppGroupId
+import dev.wrtctrl.viewmodel.AppItem
 import dev.wrtctrl.viewmodel.AppRegistry
 import dev.wrtctrl.viewmodel.AppsViewModel
 
@@ -120,13 +120,13 @@ fun AppsScreen(
                             }
                             items(
                                 count = apps.size,
-                                key = { i -> "${group.name}_${apps[i].entry.id}" },
+                                key = { i -> "${group.name}_${apps[i].id}" },
                             ) { i ->
                                 AppGridItem(
                                     app = apps[i],
                                     onClick = {
-                                        if (isToolId(apps[i].entry.id)) {
-                                            openToolId = apps[i].entry.id
+                                        if (isToolId(apps[i].id)) {
+                                            openToolId = apps[i].id
                                         } else {
                                             Toast.makeText(context, comingSoon, Toast.LENGTH_SHORT).show()
                                         }
@@ -157,7 +157,7 @@ private fun GroupHeader(group: AppGroupId) {
 }
 
 @Composable
-private fun AppGridItem(app: AppDisplay, onClick: () -> Unit) {
+private fun AppGridItem(app: AppItem, onClick: () -> Unit) {
     val icon = remember(app.icon) { resolveIcon(app.icon) }
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -190,7 +190,7 @@ private fun AppGridItem(app: AppDisplay, onClick: () -> Unit) {
         }
         Spacer(Modifier.height(4.dp))
         Text(
-            appName(app),
+            stringResource(app.nameRes),
             style = MaterialTheme.typography.labelSmall,
             textAlign = TextAlign.Center,
             maxLines = 1,
@@ -213,28 +213,8 @@ private fun resolveIcon(name: String): ImageVector = when (name) {
     "Router" -> Icons.Filled.Router
     "WifiTethering" -> Icons.Filled.WifiTethering
     "Share" -> Icons.Filled.Share
-    "HardDrive" -> Icons.Filled.Save
+    "Save" -> Icons.Filled.Save
     "Print" -> Icons.Filled.Print
     "Schedule" -> Icons.Filled.Schedule
     else -> Icons.Filled.Link
-}
-
-@Composable
-private fun appName(app: AppDisplay): String = when (app.entry.id) {
-    "route" -> stringResource(R.string.apps_route)
-    "process" -> stringResource(R.string.apps_process)
-    "startup" -> stringResource(R.string.apps_startup)
-    "diag" -> stringResource(R.string.apps_diag)
-    "syslog" -> stringResource(R.string.apps_syslog)
-    "conntrack" -> stringResource(R.string.apps_conntrack)
-    "reboot" -> stringResource(R.string.apps_reboot)
-    "arpbind" -> stringResource(R.string.arpbind_title)
-    "firewall" -> stringResource(R.string.firewall_title)
-    "upnp" -> stringResource(R.string.upnp_title)
-    "wolultra" -> stringResource(R.string.wolultra_title)
-    "samba4" -> stringResource(R.string.samba_title)
-    "cifs" -> stringResource(R.string.cifs_title)
-    "usb-printer" -> stringResource(R.string.usb_printer_title)
-    "autoreboot" -> stringResource(R.string.autoreboot_title)
-    else -> app.entry.id
 }
