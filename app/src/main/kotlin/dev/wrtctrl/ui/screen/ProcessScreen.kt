@@ -140,8 +140,9 @@ private fun ProcessCard(row: ProcessRow, expanded: Boolean, onToggle: () -> Unit
             }
             if (expanded) {
                 Spacer(Modifier.height(8.dp))
-                CopyableRow(stringResource(R.string.process_user), row.user)
-                CopyableRow(stringResource(R.string.process_parent_pid), row.ppid)
+                CopyableRow("PID", row.pid)
+                InfoRow(stringResource(R.string.process_user), row.user)
+                InfoRow(stringResource(R.string.process_parent_pid), row.ppid)
                 InfoRow(stringResource(R.string.process_memory_percent), row.memPercent)
                 CopyableRow(stringResource(R.string.process_command), row.command.ifBlank { "-" })
             }

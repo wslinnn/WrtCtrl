@@ -30,12 +30,13 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.wrtctrl.R
 import dev.wrtctrl.ui.component.CopyableRow
+import dev.wrtctrl.ui.component.InfoRow
 import dev.wrtctrl.viewmodel.RouteRow
 import dev.wrtctrl.viewmodel.RouteViewModel
 import dev.wrtctrl.viewmodel.StartupRow
 import dev.wrtctrl.viewmodel.StartupViewModel
 
-/** 路由表页：#序号 + 家族·类型徽章；六行全 copyable */
+/** 路由表页：#序号 + 家族·类型徽章；地址三行可复制，设备/scope/table 只读 */
 @Composable
 fun RouteScreen(deviceId: String?, onBack: () -> Unit) {
     val app = LocalContext.current.applicationContext as Application
@@ -97,10 +98,10 @@ private fun RouteCard(index: Int, route: RouteRow) {
             }
             route.destination?.let { CopyableRow(stringResource(R.string.route_destination), it) }
             route.gateway?.let { CopyableRow(stringResource(R.string.route_gateway), it) }
-            route.device?.let { CopyableRow(stringResource(R.string.route_device), it) }
+            route.device?.let { InfoRow(stringResource(R.string.route_device), it) }
             route.src?.let { CopyableRow(stringResource(R.string.route_src), it) }
-            route.scope?.let { CopyableRow(stringResource(R.string.route_scope), it) }
-            route.table?.let { CopyableRow(stringResource(R.string.route_table), it) }
+            route.scope?.let { InfoRow(stringResource(R.string.route_scope), it) }
+            route.table?.let { InfoRow(stringResource(R.string.route_table), it) }
         }
     }
 }
