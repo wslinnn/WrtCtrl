@@ -380,7 +380,6 @@
     <string name="apps_group_storage">存储与共享</string>
     <string name="apps_group_system">系统维护</string>
     <string name="apps_group_proxy">代理</string>
-    <string name="apps_no_plugins">未检测到可用插件</string>
     <string name="arpbind_title">IP/MAC 绑定</string>
     <string name="arpbind_desc">ARP 静态绑定，防止 IP 被 ARP 欺骗篡改</string>
     <string name="arpbind_add_rule">添加绑定</string>

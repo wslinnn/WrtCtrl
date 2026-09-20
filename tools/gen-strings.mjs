@@ -59,12 +59,14 @@ const OVERRIDES = {
 // - device_list_ping_hint: "延迟为 HTTP 响应时间，仅供参考"——延迟已是真 ICMP ping，提示不再成立
 // - client_tip / client_confirm_disconnect / client_disconnect_success / client_disconnect_failed:
 //   踢人功能整体移除
+// - apps_no_plugins: 应用中心「无可用插件」空态不可达——7 固定工具 probeConfig=null 恒显
 const DROP_KEYS = new Set([
   'device_list_ping_hint',
   'client_tip',
   'client_confirm_disconnect',
   'client_disconnect_success',
   'client_disconnect_failed',
+  'apps_no_plugins',
 ]);
 
 const zh = JSON.parse(readFileSync(join(localeDir, 'zh-Hans.json'), 'utf8'));

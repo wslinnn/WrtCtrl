@@ -380,7 +380,6 @@
     <string name="apps_group_storage">Storage</string>
     <string name="apps_group_system">System</string>
     <string name="apps_group_proxy">Proxy</string>
-    <string name="apps_no_plugins">No plugins available</string>
     <string name="arpbind_title">IP/MAC Binding</string>
     <string name="arpbind_desc">Static ARP binding to prevent ARP spoofing</string>
     <string name="arpbind_add_rule">Add Binding</string>

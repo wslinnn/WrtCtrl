@@ -82,40 +82,31 @@ fun AppsScreen(
     LaunchedEffect(deviceId) { vm.ensureLoaded(deviceId) }
     val context = LocalContext.current
     val comingSoon = stringResource(R.string.apps_coming_soon)
-    val currentComingSoon by androidx.compose.runtime.rememberUpdatedState(comingSoon)
-    // 工具页覆盖：组合级分支必须自带 BackHandler（ToolPage 内实现），此处仅记 id
+    // 工具页覆盖：组合级分支，返回键由 ToolPage 自带 BackHandler 兜底，此处仅记 id
     var openToolId by rememberSaveable { mutableStateOf<String?>(null) }
-    androidx.activity.compose.BackHandler(enabled = openToolId != null) { openToolId = null }
-    PullToRefreshBox(
-        isRefreshing = state.refreshing,
-        onRefresh = vm::refresh,
-        modifier = modifier.fillMaxSize(),
-    ) {
-        openToolId?.let { toolId ->
-            ToolRouter(
-                toolId = toolId,
-                deviceId = deviceId,
-                onBack = { openToolId = null },
-                onSessionLost = onSessionLost,
-            )
-            return@PullToRefreshBox
-        }
-        when {
-            state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
+    val toolId = openToolId
+    if (toolId != null) {
+        // 工具页与外层下拉刷新结构互斥：诊断/重启页无内层刷新，宿主 PTR 不得越权重探测插件
+        ToolRouter(
+            toolId = toolId,
+            deviceId = deviceId,
+            onBack = { openToolId = null },
+            onSessionLost = onSessionLost,
+        )
+    } else {
+        PullToRefreshBox(
+            isRefreshing = state.refreshing,
+            onRefresh = vm::refresh,
+            modifier = modifier.fillMaxSize(),
+        ) {
+            when {
+                state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
 
-            else -> {
-                val groups = remember(state.installed) { AppRegistry.visibleGroups(state.installed) }
-                if (groups.isEmpty()) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            stringResource(R.string.apps_no_plugins),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                } else {
+                else -> {
+                    // groups 恒非空（固定工具 probeConfig=null 恒显），无空态分支
+                    val groups = remember(state.installed) { AppRegistry.visibleGroups(state.installed) }
                     LazyVerticalGrid(
                         columns = GridCells.Adaptive(minSize = 80.dp),
                         modifier = Modifier.fillMaxSize(),
@@ -137,7 +128,7 @@ fun AppsScreen(
                                         if (isToolId(apps[i].entry.id)) {
                                             openToolId = apps[i].entry.id
                                         } else {
-                                            Toast.makeText(context, currentComingSoon, Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, comingSoon, Toast.LENGTH_SHORT).show()
                                         }
                                     },
                                 )
