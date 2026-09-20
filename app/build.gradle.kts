@@ -52,6 +52,15 @@ android {
             if (signingConfigs.names.contains("release")) {
                 signingConfig = signingConfigs.getByName("release")
             }
+            // debug 也开 R8 裁剪：material-icons-extended 全量图标在 debug 下不裁剪会占
+            // 40MB+ dex（APK 74MB→~25MB），高频装包体积优先于构建速度（+约1min）。
+            // dontobfuscate 保留类名/行号——last_crash.txt 崩溃堆栈必须可读（排障依赖）。
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+                "proguard-rules-debug.pro"
+            )
         }
         release {
             isMinifyEnabled = true
