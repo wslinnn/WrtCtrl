@@ -6,7 +6,6 @@ appcompat = "1.8.0"
 lifecycleRuntimeKtx = "2.11.0"
 activityCompose = "1.13.0"
 composeBom = "2026.09.00"
-navigationCompose = "2.10.1"
 datastore = "1.2.1"
 coroutines = "1.11.0"
 vico = "3.3.1"
@@ -29,7 +28,6 @@ androidx-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 androidx-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
-androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 vico-compose = { group = "com.patrykandpatrick.vico", name = "compose-m3", version.ref = "vico" }
 reorderable = { group = "sh.calvin.reorderable", name = "reorderable", version.ref = "reorderable" }
@@ -39,7 +37,7 @@ org-json = { group = "org.json", name = "json", version.ref = "orgJson" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]
+# 不声明 kotlin-android：AGP 9 内置 Kotlin，不 apply org.jetbrains.kotlin.android（见根 build.gradle.kts 注释）
 android-application = { id = "com.android.application", version.ref = "agp" }
-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }

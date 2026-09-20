@@ -31,7 +31,8 @@ pub fn ping_level(ms: u64) -> PingLevel {
 }
 
 impl RouterClient {
-    /// 探活任意设备根 URL（设备列表页并行 ping 多台用）
+    /// 探活任意设备根 URL（设备列表页并行 ping 多台用；当前设备探活同样
+    /// 经此以 baseUrl 发起——ping_device 包装无消费者已删）
     pub async fn ping_url(&self, base_url: &str) -> Option<u64> {
         if let Some(host) = host_of(base_url) {
             if let Some(ms) = icmp_ping(&host).await {
@@ -39,17 +40,6 @@ impl RouterClient {
             }
         }
         http_probe(self, base_url).await
-    }
-
-    /// 探活当前设备
-    pub async fn ping_device(&self) -> Option<u64> {
-        let base = self
-            .session
-            .read()
-            .await
-            .as_ref()
-            .map(|d| d.base_url.clone())?;
-        self.ping_url(&base).await
     }
 }
 

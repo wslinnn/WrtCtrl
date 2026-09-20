@@ -9,7 +9,6 @@ use wrtctrl_core::diag::NSLOOKUP_TIMEOUT;
 use wrtctrl_core::error::UbusError;
 use wrtctrl_core::rpc::RouterClient;
 use wrtctrl_core::syslog::LogLevel;
-use wrtctrl_core::{ping_level, PingLevel};
 
 // ── files ──
 
@@ -273,23 +272,8 @@ async fn assoclist_passthrough_and_guard() {
 }
 
 // ── ping 探测（ICMP 优先 + HTTP HEAD 兜底，见 ping.rs）──
-
-/// 契约：对可达目标返回毫秒数（桌面无 /system/bin/ping，实际走 HTTP 兜底；ICMP 路径由集成验收覆盖）；
-/// 分档边界 <100/<300 见 ping.rs 内嵌单测
-#[tokio::test]
-async fn ping_device_probes_base_url() {
-    let server = MockServer::start().await;
-    Mock::given(wiremock::matchers::method("HEAD"))
-        .respond_with(ok_response(json!({})))
-        .mount(&server)
-        .await;
-    let client = client_to(&server, "s").await;
-
-    let ms = client.ping_device().await;
-    assert!(ms.is_some(), "在线设备必须返回 Some");
-    let _ = ping_level(ms.unwrap());
-    assert_eq!(ping_level(299), PingLevel::Ok);
-}
+// 
+// 探活契约由下方 ping_url 用例覆盖，分档边界 <100/<300 见 ping.rs 内嵌单测
 
 /// 契约：ping_url 可探活任意设备（设备列表页并行 ping 多台的前提）
 #[tokio::test]

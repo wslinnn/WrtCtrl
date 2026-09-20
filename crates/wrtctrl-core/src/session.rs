@@ -8,7 +8,7 @@
 //!   失效（ubus 6/超时/网络）则用存储凭证静默重登
 //! - 凭证错误在 rpcd 表现为 result[0]=6（Permission denied）
 
-use crate::error::UbusError;
+use crate::error::{classify_network_chain, NetFailureKind, UbusError};
 use crate::rpc::{RouterClient, EMPTY_SESSION};
 use std::time::Duration;
 
@@ -47,15 +47,12 @@ impl From<UbusError> for LoginError {
             UbusError::Timeout => Self::Timeout,
             UbusError::NoDevice => Self::NoDevice,
             UbusError::InvalidResponse(m) => Self::InvalidResponse(m),
-            // 传输层错误细分：证书问题单独归类（对应旧 errMsg 字符串嗅探的意图，
-            // 但走类型化路径）
-            UbusError::Network(m)
-                if m.to_lowercase().contains("certificate")
-                    || m.to_lowercase().contains("invalid peer certificate") =>
-            {
-                Self::Certificate(m)
-            }
-            UbusError::Network(m) => Self::Network(m),
+            // 传输层错误细分：证书/TLS 问题单独归类（对应旧 errMsg 字符串嗅探的意图，
+            // 但走类型化路径；token 集与 JNI 信封共用 error::classify_network_chain）
+            UbusError::Network(m) => match classify_network_chain(&m) {
+                NetFailureKind::Tls => Self::Certificate(m),
+                _ => Self::Network(m),
+            },
             UbusError::InvalidArgument(m) => Self::InvalidResponse(m),
         }
     }

@@ -59,7 +59,6 @@ object WrtCore {
     private external fun assocListNative(ifname: String): String
     private external fun setRadioEnabledNative(radioName: String, enabled: Boolean): String
     private external fun restartRadioNative(radioName: String): String
-    private external fun pingDeviceNative(): String
     private external fun pingUrlNative(baseUrl: String): String
 
     // ── 信封解包 ──
@@ -178,11 +177,7 @@ object WrtCore {
 
     // ── 探活 ──
 
-    /** 当前设备：返回往返毫秒；离线/超时 null */
-    suspend fun pingDevice(): Long? =
-        call { pingDeviceNative() }.getJSONObject("data").optLong("ms").takeIf { it > 0L }
-
-    /** 任意设备（设备列表并行探活用） */
+    /** 任意设备（设备列表并行探活用；当前设备探活同样经此以 baseUrl 发起） */
     suspend fun pingUrl(baseUrl: String): Long? =
         call { pingUrlNative(baseUrl) }.getJSONObject("data").optLong("ms").takeIf { it > 0L }
 }

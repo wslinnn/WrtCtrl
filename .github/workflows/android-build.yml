@@ -35,6 +35,10 @@ jobs:
       - name: Rust tests
         run: cargo test -p wrtctrl-core
 
+      # detekt + JVM 单测在 CI 拦截回归
+      - name: Static analysis & unit tests
+        run: ./gradlew --no-daemon detekt testDebugUnitTest
+
       - name: Build debug APK
         run: ./gradlew --no-daemon assembleDebug
 

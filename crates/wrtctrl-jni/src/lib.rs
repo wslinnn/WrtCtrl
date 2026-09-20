@@ -76,20 +76,14 @@ fn parse_json(text: &str) -> Result<Value, UbusError> {
 
 /// 网络错误细分：从错误链关键词归类，供 UI 层给出可行动的指引
 /// （dns=解析失败[典型：域名仅 IPv6 而当前网络无 v6]、refused=端口/设备不可达、
-///  tls=TLS 握手层失败）
+///  tls=TLS 握手层失败）。token 集与 LoginError 转换共用 core 的
+/// error::classify_network_chain（单一实现）。
 fn network_code(chain: &str) -> &'static str {
-    let lower = chain.to_lowercase();
-    if lower.contains("dns error")
-        || lower.contains("failed to lookup address")
-        || lower.contains("no address associated")
-    {
-        "dns"
-    } else if lower.contains("refused") {
-        "refused"
-    } else if lower.contains("certificate") || lower.contains("tls") || lower.contains("alert") {
-        "tls"
-    } else {
-        "network"
+    match wrtctrl_core::error::classify_network_chain(chain) {
+        wrtctrl_core::error::NetFailureKind::Dns => "dns",
+        wrtctrl_core::error::NetFailureKind::Refused => "refused",
+        wrtctrl_core::error::NetFailureKind::Tls => "tls",
+        wrtctrl_core::error::NetFailureKind::Other => "network",
     }
 }
 
@@ -505,19 +499,7 @@ pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_restartRadioNative(
     guarded!(env, async move { client().restart_radio(&radio_name).await })
 }
 
-/// 探活当前设备 → {"ms": 123} 或 {"ms": null}
-#[no_mangle]
-pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_pingDeviceNative(
-    env: JNIEnv,
-    _class: JClass,
-) -> jstring {
-    guarded!(env, async {
-        let ms = client().ping_device().await;
-        Ok(json!({"ms": ms}))
-    })
-}
-
-/// 探活任意设备（设备列表并行 ping）→ {"ms": 123} 或 {"ms": null}
+/// 探活任意设备（设备列表并行 ping；当前设备同经此以 baseUrl 发起）→ {"ms": 123} 或 {"ms": null}
 #[no_mangle]
 pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_pingUrlNative(
     mut env: JNIEnv,

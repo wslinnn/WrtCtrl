@@ -35,6 +35,64 @@ impl From<serde_json::Error> for UbusError {
     }
 }
 
+/// 传输层错误链子分类：reqwest 的 Display 只有最外层，真实原因（DNS 失败/连接拒绝/
+/// 证书/TLS）在 source 链里（由 rpc::error_chain 展开）。JNI 信封与 LoginError
+/// 转换共用此单一实现——此前两处各自嗅探关键词且 token 集不一致，reqwest 文案
+/// 演进时会不同步。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetFailureKind {
+    /// 域名解析失败（典型：域名仅 IPv6 而当前网络无 v6）
+    Dns,
+    /// 连接被拒绝（端口未开放/防火墙 REJECT）
+    Refused,
+    /// TLS 握手层失败（自签证书等）
+    Tls,
+    Other,
+}
+
+pub fn classify_network_chain(chain: &str) -> NetFailureKind {
+    let lower = chain.to_lowercase();
+    if lower.contains("dns error")
+        || lower.contains("failed to lookup address")
+        || lower.contains("no address associated")
+    {
+        NetFailureKind::Dns
+    } else if lower.contains("refused") {
+        NetFailureKind::Refused
+    } else if lower.contains("certificate") || lower.contains("tls") || lower.contains("alert") {
+        NetFailureKind::Tls
+    } else {
+        NetFailureKind::Other
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn network_chain_classification() {
+        assert_eq!(
+            classify_network_chain("error sending request: dns error: failed to lookup address"),
+            NetFailureKind::Dns
+        );
+        assert_eq!(
+            classify_network_chain("error: no address associated with hostname"),
+            NetFailureKind::Dns
+        );
+        assert_eq!(
+            classify_network_chain("Connection refused (os error 111)"),
+            NetFailureKind::Refused
+        );
+        assert_eq!(
+            classify_network_chain("invalid peer certificate: CertificateExpired"),
+            NetFailureKind::Tls
+        );
+        assert_eq!(classify_network_chain("tls handshake alert"), NetFailureKind::Tls);
+        assert_eq!(classify_network_chain("connection timed out"), NetFailureKind::Other);
+    }
+}
+
 /// 会话层错误 → ubus 错误的反向映射（如 commit 预检中重登失败：
 /// Auth 还原为原始 ubus 码透传给 UI，与"预检前就是 6"的表现一致）
 impl From<crate::session::LoginError> for UbusError {
