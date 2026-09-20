@@ -512,3 +512,64 @@ pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_pingUrlNative(
         Ok(json!({"ms": ms}))
     })
 }
+
+// ── 诊断：必须走 core diag——clean_host 的 argv 净化在 core 层，Kotlin 侧
+//    不得用裸 callUbus file.exec 绕过 ──
+
+fn exec_result_json(r: wrtctrl_core::diag::ExecResult) -> Value {
+    json!({"code": r.code, "stdout": r.stdout, "stderr": r.stderr})
+}
+
+/// ping：host + count/wait/deadline（0 值回落 core 默认）
+#[no_mangle]
+pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_diagPingNative(
+    mut env: JNIEnv,
+    _class: JClass,
+    host: JString,
+    count: jint,
+    wait: jint,
+    deadline: jint,
+) -> jstring {
+    let host = jstr(&mut env, &host);
+    guarded!(env, async move {
+        let r = client()
+            .ping(&host, count.max(0) as u32, wait.max(0) as u32, deadline.max(0) as u32)
+            .await?;
+        Ok(exec_result_json(r))
+    })
+}
+
+/// traceroute：host + maxHops/wait/queries（0 值回落 core 默认；IPv6 目标自动走 traceroute6）
+#[no_mangle]
+pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_diagTracerouteNative(
+    mut env: JNIEnv,
+    _class: JClass,
+    host: JString,
+    max_hops: jint,
+    wait: jint,
+    queries: jint,
+) -> jstring {
+    let host = jstr(&mut env, &host);
+    guarded!(env, async move {
+        let r = client()
+            .traceroute(&host, max_hops.max(0) as u32, wait.max(0) as u32, queries.max(0) as u32)
+            .await?;
+        Ok(exec_result_json(r))
+    })
+}
+
+/// nslookup：host + 可选 DNS 服务器（空串 = 不指定）
+#[no_mangle]
+pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_diagNslookupNative(
+    mut env: JNIEnv,
+    _class: JClass,
+    host: JString,
+    dns_server: JString,
+) -> jstring {
+    let (host, dns_server) = (jstr(&mut env, &host), jstr(&mut env, &dns_server));
+    guarded!(env, async move {
+        let dns = if dns_server.is_empty() { None } else { Some(dns_server.as_str()) };
+        let r = client().nslookup(&host, dns).await?;
+        Ok(exec_result_json(r))
+    })
+}

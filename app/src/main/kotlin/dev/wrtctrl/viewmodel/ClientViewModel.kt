@@ -65,9 +65,11 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
     init {
         viewModelScope.launch {
             while (viewModelScope.isActive) {
-                // 挂起直至页面可见；先等一个周期再刷——进页的手动拉取不重复
+                // 挂起直至页面可见；先等一个周期再刷——进页的手动拉取不重复；
+                // delay 期间门控可能关闭：拉取前复查，避免切走后多发一轮
                 pollingActive.first { it }
                 delay(POLL_INTERVAL)
+                if (!pollingActive.value) continue
                 if (polledTab == 0) loadWirelessNow(showLoading = false) else refreshDhcp()
             }
         }

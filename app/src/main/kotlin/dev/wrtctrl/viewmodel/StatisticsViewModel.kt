@@ -60,8 +60,10 @@ class StatisticsViewModel(application: Application) : AndroidViewModel(applicati
     init {
         viewModelScope.launch {
             while (viewModelScope.isActive) {
+                // delay 期间门控可能关闭：拉取前复查，避免切走后多发一轮
                 pollingActive.first { it }
                 delay(POLL_INTERVAL)
+                if (!pollingActive.value) continue
                 if (polledTab == 0) fetchBandwidth() else fetchLoad()
             }
         }

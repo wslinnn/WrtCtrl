@@ -45,7 +45,10 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -64,22 +67,39 @@ import dev.wrtctrl.viewmodel.AppsViewModel
 /**
  * 应用中心（底栏第 5 Tab）：固定工具 + luci 插件分组网格。
  * 插件按 uci get 探测显隐（firewall 恒显）；页面无轮询（进页/下拉刷新/切设备探测一次）。
- * 插件页本体在 M4 落地，工具页在 落地——此前点击 toast「即将推出」。
+ * 工具图标进入对应工具页（覆盖本 Tab 内容区）；插件点击 toast「即将推出」。
  * 网格自适应：GridCells.Adaptive(80.dp) 宽屏 5+ 列 / 窄屏 4 列，分组标题占满整行。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppsScreen(vm: AppsViewModel, deviceId: String?, modifier: Modifier = Modifier) {
+fun AppsScreen(
+    vm: AppsViewModel,
+    deviceId: String?,
+    onSessionLost: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val state by vm.state.collectAsStateWithLifecycle()
     LaunchedEffect(deviceId) { vm.ensureLoaded(deviceId) }
     val context = LocalContext.current
     val comingSoon = stringResource(R.string.apps_coming_soon)
     val currentComingSoon by androidx.compose.runtime.rememberUpdatedState(comingSoon)
+    // 工具页覆盖：组合级分支必须自带 BackHandler（ToolPage 内实现），此处仅记 id
+    var openToolId by rememberSaveable { mutableStateOf<String?>(null) }
+    androidx.activity.compose.BackHandler(enabled = openToolId != null) { openToolId = null }
     PullToRefreshBox(
         isRefreshing = state.refreshing,
         onRefresh = vm::refresh,
         modifier = modifier.fillMaxSize(),
     ) {
+        openToolId?.let { toolId ->
+            ToolRouter(
+                toolId = toolId,
+                deviceId = deviceId,
+                onBack = { openToolId = null },
+                onSessionLost = onSessionLost,
+            )
+            return@PullToRefreshBox
+        }
         when {
             state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
@@ -114,7 +134,11 @@ fun AppsScreen(vm: AppsViewModel, deviceId: String?, modifier: Modifier = Modifi
                                 AppGridItem(
                                     app = apps[i],
                                     onClick = {
-                                        Toast.makeText(context, currentComingSoon, Toast.LENGTH_SHORT).show()
+                                        if (isToolId(apps[i].entry.id)) {
+                                            openToolId = apps[i].entry.id
+                                        } else {
+                                            Toast.makeText(context, currentComingSoon, Toast.LENGTH_SHORT).show()
+                                        }
                                     },
                                 )
                             }

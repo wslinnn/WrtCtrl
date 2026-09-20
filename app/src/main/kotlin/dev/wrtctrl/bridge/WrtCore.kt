@@ -60,6 +60,9 @@ object WrtCore {
     private external fun setRadioEnabledNative(radioName: String, enabled: Boolean): String
     private external fun restartRadioNative(radioName: String): String
     private external fun pingUrlNative(baseUrl: String): String
+    private external fun diagPingNative(host: String, count: Int, wait: Int, deadline: Int): String
+    private external fun diagTracerouteNative(host: String, maxHops: Int, wait: Int, queries: Int): String
+    private external fun diagNslookupNative(host: String, dnsServer: String): String
 
     // ── 信封解包 ──
 
@@ -180,4 +183,30 @@ object WrtCore {
     /** 任意设备（设备列表并行探活用；当前设备探活同样经此以 baseUrl 发起） */
     suspend fun pingUrl(baseUrl: String): Long? =
         call { pingUrlNative(baseUrl) }.getJSONObject("data").optLong("ms").takeIf { it > 0L }
+
+    // ── 诊断：净化/路径/超时全部在 core diag，UI 只传参 ──
+
+    /** 诊断结果：code 可空（命令被信号终止等），stdout/stderr 常合并展示 */
+    data class DiagResult(val code: Int?, val stdout: String, val stderr: String)
+
+    /** ping：count/wait/deadline 传 0 走 core 默认（4/2s/8s） */
+    suspend fun diagPing(host: String, count: Int, wait: Int, deadline: Int): DiagResult {
+        val d = dataObject { diagPingNative(host, count, wait, deadline) }
+        return DiagResult(d.optIntOrNull("code"), d.optString("stdout"), d.optString("stderr"))
+    }
+
+    /** traceroute：maxHops/wait/queries 传 0 走 core 默认（15/1s/1）；IPv6 目标自动换 traceroute6 */
+    suspend fun diagTraceroute(host: String, maxHops: Int, wait: Int, queries: Int): DiagResult {
+        val d = dataObject { diagTracerouteNative(host, maxHops, wait, queries) }
+        return DiagResult(d.optIntOrNull("code"), d.optString("stdout"), d.optString("stderr"))
+    }
+
+    /** nslookup：dnsServer 空串 = 不指定；busybox 无 deadline，core 内部 25s 兜底 */
+    suspend fun diagNslookup(host: String, dnsServer: String = ""): DiagResult {
+        val d = dataObject { diagNslookupNative(host, dnsServer) }
+        return DiagResult(d.optIntOrNull("code"), d.optString("stdout"), d.optString("stderr"))
+    }
+
+    private fun JSONObject.optIntOrNull(key: String): Int? =
+        if (has(key) && !isNull(key)) getInt(key) else null
 }

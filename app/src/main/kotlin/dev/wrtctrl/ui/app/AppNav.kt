@@ -250,7 +250,7 @@ private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
                 1 -> StatisticsScreen(statisticsVm, currentDevice?.id, Modifier.fillMaxSize())
                 2 -> ClientScreen(clientVm, currentDevice?.id, Modifier.fillMaxSize())
                 3 -> NetworkScreen(networkVm, currentDevice?.id, Modifier.fillMaxSize())
-                else -> AppsScreen(appsVm, currentDevice?.id, Modifier.fillMaxSize())
+                else -> AppsScreen(appsVm, currentDevice?.id, onSessionLost = { vm.openDeviceList() }, Modifier.fillMaxSize())
             }
         }
     }

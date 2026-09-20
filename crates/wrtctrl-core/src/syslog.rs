@@ -4,7 +4,9 @@
 //! - file.exec /usr/libexec/syslog-wrapper（ACL luci-mod-status 授予）。ubus log read
 //!   在目标固件返回空（logd ubus 接口读不到 ring buffer），故走 wrapper；10s 硬超时兜底
 //! - dmesg 走 /bin/dmesg -r（ACL 授予 "/bin/dmesg -r"）
-//! - 保留最后 800 行（MAX_LINES）
+//! - 不在 app 端截断：
+//!   日志淘汰由路由器 logd 环形缓冲区自身负责，wrapper 返回什么就展示什么
+//! - dmesg 走 /bin/dmesg -r（ACL 授予 "/bin/dmesg -r"）
 
 use crate::error::UbusError;
 use crate::rpc::RouterClient;
@@ -12,7 +14,6 @@ use serde::Serialize;
 use serde_json::json;
 use std::time::Duration;
 
-pub const MAX_LINES: usize = 800;
 const SYSLOG_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -92,13 +93,13 @@ pub fn classify_dmesg(line: &str) -> LogLevel {
     }
 }
 
+/// 全量行化：空行剔除、逐行分级，不做条数截断（淘汰责任在路由器 logd 环形缓冲区）
 fn to_lines(stdout: &str, classify: fn(&str) -> LogLevel) -> Vec<LogLine> {
-    let lines: Vec<&str> = stdout.lines().filter(|l| !l.is_empty()).collect();
-    let skip = lines.len().saturating_sub(MAX_LINES);
-    lines[skip..]
-        .iter()
+    stdout
+        .lines()
+        .filter(|l| !l.is_empty())
         .map(|l| LogLine {
-            text: (*l).to_string(),
+            text: l.to_string(),
             level: classify(l),
         })
         .collect()
@@ -167,11 +168,11 @@ mod tests {
     }
 
     #[test]
-    fn lines_capped_to_max_lines() {
+    fn lines_preserve_all() {
         let stdout: String = (0..805).map(|i| format!("line{i}\n")).collect();
         let lines = to_lines(&stdout, |_| LogLevel::Info);
-        assert_eq!(lines.len(), MAX_LINES);
+        assert_eq!(lines.len(), 805);
+        assert_eq!(lines.first().unwrap().text, "line0");
         assert_eq!(lines.last().unwrap().text, "line804");
-        assert_eq!(lines.first().unwrap().text, "line5");
     }
 }

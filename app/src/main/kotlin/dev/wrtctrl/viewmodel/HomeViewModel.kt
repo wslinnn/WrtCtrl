@@ -95,10 +95,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     init {
         viewModelScope.launch {
             while (viewModelScope.isActive) {
-                // 不可见时在此挂起（不占任何资源），回到可见等一个周期再刷
+                // 不可见时在此挂起（不占任何资源），回到可见等一个周期再刷；
+                // delay 期间门控可能关闭：拉取前复查，避免切走后多发一轮
                 pollingActive.first { it }
                 delay(POLL_INTERVAL)
-                pollOnce()
+                if (pollingActive.value) pollOnce()
             }
         }
         viewModelScope.launch {
