@@ -28,7 +28,7 @@ private val LABEL_WIDTH = 104.dp
 fun InfoRow(label: String, value: String, modifier: Modifier = Modifier, compact: Boolean = false) {
     Row(
         modifier.fillMaxWidth().padding(vertical = 2.dp),
-        verticalAlignment = Alignment.Top,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             label,
@@ -41,7 +41,8 @@ fun InfoRow(label: String, value: String, modifier: Modifier = Modifier, compact
     }
 }
 
-/** 可复制信息行：点击整行复制 value 并以 toast 反馈；display 缺省与 value 一致
+/** 可复制信息行（复制可发现化收敛为隐式）：整行点击复制 + toast 反馈，无视觉标识
+ *  （假按钮图标不如没有）；display 缺省与 value 一致
  *  （IPv6 等长值场景：显示截断、复制完整）；compact 语义同 InfoRow */
 @Composable
 fun CopyableRow(
@@ -61,7 +62,7 @@ fun CopyableRow(
                 Toast.makeText(context, context.getString(R.string.common_copied), Toast.LENGTH_SHORT).show()
             }
             .padding(vertical = 2.dp),
-        verticalAlignment = Alignment.Top,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             label,

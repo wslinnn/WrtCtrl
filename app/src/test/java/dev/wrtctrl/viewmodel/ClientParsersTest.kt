@@ -21,7 +21,7 @@ class ClientParsersTest {
     }
 
     @Test
-    fun `关联终端解析——字段与 hostname 合并（mac 大写匹配）`() {
+    fun `关联终端解析——字段与 hostname 和 IP 合并（mac 大写匹配）`() {
         val results = JSONArray(
             """
             [{"mac":"AA:BB:CC:DD:EE:FF","signal":-48,"connected_time":3661,
@@ -35,6 +35,7 @@ class ClientParsersTest {
             "5G",
             results,
             mapOf("AA:BB:CC:DD:EE:FF" to "pixel"),
+            mapOf("AA:BB:CC:DD:EE:FF" to "192.168.2.50"),
         )
         assertEquals(1, clients.size) // 无 mac 的脏数据剔除
         val c = clients[0]
@@ -42,6 +43,7 @@ class ClientParsersTest {
         assertEquals(-48, c.signal)
         assertEquals(3661L, c.connectedTime)
         assertEquals("pixel", c.hostname)
+        assertEquals("192.168.2.50", c.ip)
         assertEquals("phy0-ap0", c.ifname)
         assertEquals("5G", c.band)
     }
@@ -74,6 +76,27 @@ class ClientParsersTest {
         val v6 = listOf(DhcpLease("new-name", "aa:bb:cc:dd:ee:ff", "2409::1", "duid", 100))
         val map = ClientParsers.hostnameMap(v4, v6)
         assertEquals("new-name", map["AA:BB:CC:DD:EE:FF"])
+    }
+
+    @Test
+    fun `ipMap 与静态租约 mac 集合`() {
+        val v4 = listOf(
+            DhcpLease("nas", "aa:bb:cc:dd:ee:ff", "192.168.2.10", null, 100),
+            DhcpLease("noip", "11:22:33:44:55:66", "", null, 100),
+        )
+        assertEquals("192.168.2.10", ClientParsers.ipMap(v4)["AA:BB:CC:DD:EE:FF"])
+        assertEquals(1, ClientParsers.ipMap(v4).size)
+        val uci = JSONObject(
+            """
+            {"@host[0]":{"name":"@host[0]","section_type":"host","anonymous":false,
+              "options":{"name":"printer","mac":"AA:BB:CC:00:00:01","ip":"192.168.2.50"}},
+             "@host[1]":{"name":"@host[1]","section_type":"host","anonymous":false,
+              "options":{"name":"nolower","mac":"","ip":"192.168.2.51"}},
+             "defaults":{"name":"defaults","section_type":"defaults","anonymous":false,
+              "options":{"dhcp_option":"42"}}}
+            """.trimIndent(),
+        )
+        assertEquals(setOf("AA:BB:CC:00:00:01"), ClientParsers.staticHostMacs(uci))
     }
 
     @Test

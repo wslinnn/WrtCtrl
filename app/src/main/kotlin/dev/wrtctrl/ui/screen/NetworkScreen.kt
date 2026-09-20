@@ -1,5 +1,10 @@
 package dev.wrtctrl.ui.screen
 
+import androidx.compose.animation.AnimatedVisibility
+import android.widget.Toast
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -8,48 +13,60 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.wrtctrl.R
-import dev.wrtctrl.ui.component.Badge
-import dev.wrtctrl.ui.component.GroupHeader
-import dev.wrtctrl.ui.component.PollingGate
+import dev.wrtctrl.ui.component.BadgeTone
 import dev.wrtctrl.ui.component.CopyableRow
+import dev.wrtctrl.ui.component.GroupHeader
 import dev.wrtctrl.ui.component.InfoRow
+import dev.wrtctrl.ui.component.PollingGate
+import dev.wrtctrl.ui.component.QrCodeImage
+import dev.wrtctrl.ui.component.SignalBars
+import dev.wrtctrl.ui.component.StatusBadge
+import dev.wrtctrl.ui.component.signalLevel
+import dev.wrtctrl.ui.theme.ChartColors
 import dev.wrtctrl.util.Format
-import dev.wrtctrl.viewmodel.DeviceGroup
+import dev.wrtctrl.util.WifiQr
 import dev.wrtctrl.viewmodel.IfaceInfo
 import dev.wrtctrl.viewmodel.NetDeviceInfo
 import dev.wrtctrl.viewmodel.NetworkParsers
@@ -57,127 +74,145 @@ import dev.wrtctrl.viewmodel.NetworkUiState
 import dev.wrtctrl.viewmodel.NetworkViewModel
 import dev.wrtctrl.viewmodel.RadioInfo
 import dev.wrtctrl.viewmodel.WifiIface
+import dev.wrtctrl.viewmodel.WifiSecret
 
-/** 网络页：接口 / 设备 / 无线三视角。可见时 3s 静默轮询当前 Tab。 */
+/** 网络页（三 Tab 合一屏）：接口（IP 大字 + UP/DOWN 徽章 + wan 实时速率 +
+ *  开机累计）/ 无线（SSID 卡：加密 + 信道 + 信号档位 + 关联数 + 二维码）/ 系统设备（承载关系）。
+ *  可见时 3s 静默轮询全量。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NetworkScreen(vm: NetworkViewModel, deviceId: String?, modifier: Modifier = Modifier) {
     val state by vm.state.collectAsStateWithLifecycle()
     LaunchedEffect(deviceId) { vm.ensureLoaded(deviceId) }
-    var tab by rememberSaveable { mutableIntStateOf(0) }
-    // 无线数据首进该 Tab 才拉（loadWireless 自带 wirelessLoaded 门）+ 轮询目标上报
-    LaunchedEffect(tab) {
-        if (tab == 2) vm.loadWireless()
-        vm.onTab(tab)
-    }
+    // showQrFor = 二维码弹窗的运行时 ifname（已移除认证环节，点动作直接拉凭据显码）
+    var showQrFor by remember { mutableStateOf<String?>(null) }
     // 可见才轮询：组合级可见（底部 Tab 选中）× 生命周期双门控（共享 PollingGate）
     PollingGate(onActiveChange = vm::setPollingActive)
-    Column(modifier) {
-        val tabs = listOf(
-            R.string.network_interfaces,
-            R.string.network_devices,
-            R.string.network_wireless,
-        )
-        TabRow(selectedTabIndex = tab) {
-            tabs.forEachIndexed { index, res ->
-                Tab(
-                    selected = tab == index,
-                    onClick = { tab = index },
-                    text = { Text(stringResource(res)) },
+    showQrFor?.let { ifname ->
+        WifiQrDialog(
+            ifname,
+            state.wifiSecrets[ifname],
+            errorText = state.wifiSecretErrors[ifname],
+            onRetry = { vm.fetchWifiSecret(ifname) },
+        ) { showQrFor = null }
+    }
+    PullToRefreshBox(
+        isRefreshing = state.refreshing,
+        onRefresh = vm::refresh,
+        modifier = modifier.fillMaxSize(),
+    ) {
+        if (state.loading) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        } else if (state.ifaces.isEmpty() && state.loadFailed) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    stringResource(R.string.common_load_failed),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-        PullToRefreshBox(
-            isRefreshing = state.refreshing,
-            onRefresh = vm::refresh,
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            when (tab) {
-                0 -> IfaceTab(state)
-                1 -> DeviceTab(state)
-                else -> WirelessTab(state)
+                } else {
+                    val deviceByName = remember(state.deviceGroups) {
+                        state.deviceGroups.flatMap { it.devices }.associateBy { it.name }
+                    }
+                    val chipByIfname = remember(state.radios) {
+                        val map = mutableMapOf<String, String?>()
+                        state.radios.forEach { radio ->
+                            radio.ifaces.forEach { iface -> map[iface.ifname] = radio.chip }
+                        }
+                        map
+                    }
+                    // 未拉取凭据则先拉一次（uci wireless），随即开二维码弹窗
+                    fun requestWifi(ifname: String) {
+                        if (!state.wifiSecrets.containsKey(ifname)) vm.fetchWifiSecret(ifname)
+                        showQrFor = ifname
+                    }
+                    LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item { GroupHeader(stringResource(R.string.network_interfaces)) }
+                items(state.ifaces, key = { it.name }) {
+                    IfaceCard(it, state.wanRates, deviceByName[it.l3Device])
+                }
+                item { GroupHeader(stringResource(R.string.network_wireless), Modifier.padding(top = 8.dp)) }
+                when {
+                    !state.wirelessLoaded && !state.wirelessFailed ->
+                        item { SectionText(stringResource(R.string.network_wireless_loading)) }
+                    state.radios.isEmpty() && state.wirelessFailed ->
+                        item { SectionText(stringResource(R.string.common_load_failed)) }
+                    state.radios.isEmpty() ->
+                        item { SectionText(stringResource(R.string.wifi_no_radio)) }
+                    else ->
+                        items(
+                            state.radios.flatMap { radio -> radio.ifaces.map { radio to it } },
+                            key = { it.second.ifname },
+                        ) { (radio, iface) ->
+                            SsidCard(
+                                radio = radio,
+                                iface = iface,
+                                assocCount = state.assocCounts[iface.ifname],
+                                secret = state.wifiSecrets[iface.ifname],
+                                onRequestWifi = { requestWifi(iface.ifname) },
+                            )
+                        }
+                }
+                item { GroupHeader(stringResource(R.string.network_sys_devices), Modifier.padding(top = 8.dp)) }
+                val sysDevices = state.deviceGroups.filter { it.type != "bridge" }.flatMap { it.devices }
+                if (sysDevices.isEmpty()) {
+                    item { SectionText(stringResource(R.string.network_empty)) }
+                } else {
+                    items(sysDevices, key = { "dev_${it.name}" }) { device ->
+                        DeviceRow(
+                            device,
+                            carrying = carryingLabel(device, state),
+                            chip = chipByIfname[device.name],
+                        )
+                    }
+                }
             }
         }
     }
 }
 
-@Composable
-private fun IfaceTab(state: NetworkUiState) {
-    if (state.loading) {
-        CenterContent(spinner = true)
-    } else if (state.ifaces.isEmpty() && state.loadFailed) {
-        CenterContent(stringResource(R.string.common_load_failed))
-    } else if (state.ifaces.isEmpty()) {
-        CenterContent(stringResource(R.string.network_empty))
-    } else {
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            items(state.ifaces.size) { i -> IfaceCard(state.ifaces[i]) }
-        }
-    }
+/** 设备的承载关系：l3_device 命中 → 承载接口名；无线 ifname 命中 → 承载 SSID */
+private fun carryingLabel(device: NetDeviceInfo, state: NetworkUiState): String? {
+    state.ifaces.firstOrNull { it.l3Device == device.name }?.let { return it.name }
+    state.radios.flatMap { it.ifaces }.firstOrNull { it.ifname == device.name }?.let { return it.ssid }
+    return null
 }
 
+/** 接口卡：卡头（名称·协议 / 主值 / 状态徽章 / chevron，整行点击展开）
+ *  + 网关/DNS 值条 + 摘要行（wan 实时速率 + 开机累计，灰）；
+ *  MAC/MTU/桥接端口/IPv4/IPv6/PD 收进展开区。wan 主卡默认展开（唯一有实时速率）。 */
 @Composable
-private fun IfaceCard(iface: IfaceInfo) {
+private fun IfaceCard(
+    iface: IfaceInfo,
+    wanRates: Pair<Long, Long>?,
+    device: NetDeviceInfo?,
+) {
     var showV6Dialog by remember { mutableStateOf(false) }
     var showPdDialog by remember { mutableStateOf(false) }
+    var expanded by rememberSaveable { mutableStateOf(iface.name == "wan") }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp)) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    iface.name.uppercase() + (iface.l3Device?.let { " ($it)" } ?: ""),
-                    Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Badge(iface.proto ?: "-")
-            }
-            iface.mac?.let { CopyableRow(stringResource(R.string.network_mac), it) }
-            InfoRow(
-                stringResource(R.string.network_traffic_rx_tx),
-                "${Format.bytes(iface.rxBytes)} / ${Format.bytes(iface.txBytes)}",
-            )
-            iface.ipv4?.let { CopyableRow(stringResource(R.string.network_ipv4), it) }
-            if (iface.ipv6Addrs.isNotEmpty() || iface.ipv6Prefix.isNotEmpty()) {
-                // 地址或委派前缀任一非空即显行；地址空时显示 -（眼睛仍可看 PD 分节）
-                val eyeVisible = iface.ipv6Prefix.isNotEmpty() || iface.ipv6Addrs.size > 1
-                val first = iface.ipv6Addrs.firstOrNull()
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                    CopyableRow(
-                        label = stringResource(R.string.network_ipv6),
-                        value = first ?: "-",
-                        modifier = Modifier.weight(1f),
-                        display = first?.let(::truncate30) ?: "-",
-                    )
-                    if (eyeVisible) {
-                        EyeButton(stringResource(R.string.network_ipv6)) { showV6Dialog = true }
+            IfaceHeader(iface, expanded) { expanded = !expanded }
+            IfaceRatesRow(iface, wanRates)
+            AnimatedVisibility(visible = expanded) {
+                Column(Modifier.padding(top = 6.dp)) {
+                    iface.mac?.let { CopyableRow(stringResource(R.string.network_mac), it) }
+                    device?.mtu?.let { InfoRow(stringResource(R.string.network_mtu), it.toString()) }
+                    if (device?.ports?.isNotEmpty() == true) {
+                        InfoRow(stringResource(R.string.network_bridge_ports), device.ports.joinToString(", "))
                     }
-                }
-            }
-            if (iface.ipv6PdAssign.isNotEmpty()) {
-                val first = iface.ipv6PdAssign.first()
-                val eyeVisible = iface.ipv6PdAssign.size > 1 || first.length > 30
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                    CopyableRow(
-                        label = stringResource(R.string.network_ipv6_pd_assign),
-                        value = first,
-                        modifier = Modifier.weight(1f),
-                        display = truncate30(first),
+                    iface.ipv4?.let { CopyableRow(stringResource(R.string.network_ipv4), it) }
+                    IfaceV6Rows(
+                        iface,
+                        onShowV6 = { showV6Dialog = true },
+                        onShowPd = { showPdDialog = true },
                     )
-                    if (eyeVisible) {
-                        EyeButton(stringResource(R.string.network_ipv6_pd_assign)) { showPdDialog = true }
-                    }
                 }
-            }
-            iface.gateway?.let { CopyableRow(stringResource(R.string.network_gateway), it) }
-            iface.dns.forEach { dns ->
-                CopyableRow(stringResource(R.string.network_dns), dns)
             }
         }
     }
@@ -200,217 +235,311 @@ private fun IfaceCard(iface: IfaceInfo) {
     }
 }
 
+/** 卡头：名称·协议 label + 主值 + UP/DOWN 徽章 + chevron，整行点击展开/收起。
+ *  主值：DOWN「未连接」置灰；UP 有 IPv4 显 IPv4，仅 IPv6 显「仅 IPv6」，无地址显「无地址」
+ *  （需同时确认 IPv4 或 IPv6 任一存在，IPv6-only 接口不被误标「未连接」）。
+ *  网关/DNS 值条属摘要，始终可见。 */
 @Composable
-private fun EyeButton(contentDescription: String, onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(32.dp)) {
-        Icon(
-            Icons.Filled.Visibility,
-            contentDescription = contentDescription,
-            modifier = Modifier.size(18.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+private fun IfaceHeader(iface: IfaceInfo, expanded: Boolean, onToggle: () -> Unit) {
+    Column {
+        Row(
+            Modifier.fillMaxWidth().clickable(onClick = onToggle),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    listOfNotNull(iface.name, iface.proto?.lowercase()).joinToString(" · "),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val mainValue = when {
+                    !iface.up -> stringResource(R.string.network_not_connected)
+                    iface.ipv4 != null -> iface.ipv4
+                    iface.ipv6Addrs.isNotEmpty() || iface.ipv6Prefix.isNotEmpty() ->
+                        stringResource(R.string.network_ipv6_only)
+                    else -> stringResource(R.string.network_no_address)
+                }
+                Text(
+                    mainValue,
+                    style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"),
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = if (iface.up) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+            StatusBadge(
+                stringResource(if (iface.up) R.string.network_up else R.string.network_down),
+                if (iface.up) BadgeTone.OK else BadgeTone.ERR,
+            )
+            Icon(
+                if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                contentDescription = null,
+                modifier = Modifier.padding(start = 8.dp).size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (iface.gateway != null || iface.dns.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                iface.gateway?.let { SubChip(stringResource(R.string.network_gateway), it) }
+                iface.dns.firstOrNull()?.let { SubChip(stringResource(R.string.network_dns), it) }
+            }
+        }
+    }
+}
+
+/** 速率行：wan 实时（↓↑ 单位独立换档）+ 开机累计（口径限定词） */
+@Composable
+private fun IfaceRatesRow(iface: IfaceInfo, wanRates: Pair<Long, Long>?) {
+    val rates = wanRates?.takeIf { iface.name == "wan" }
+    if (rates == null && iface.rxBytes <= 0 && iface.txBytes <= 0) return
+    val dark = isSystemInDarkTheme()
+    val rxText = if (dark) ChartColors.rxTextDark else ChartColors.rxTextLight
+    val txText = if (dark) ChartColors.txTextDark else ChartColors.txTextLight
+    Row(
+        Modifier.fillMaxWidth().padding(top = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (rates != null) {
+            val rx = Format.rateParts(rates.first)
+            val tx = Format.rateParts(rates.second)
+            Text(
+                "↓ ${rx.value} ${rx.unit}",
+                style = MaterialTheme.typography.labelMedium,
+                color = rxText,
+            )
+            Text(
+                "↑ ${tx.value} ${tx.unit}",
+                style = MaterialTheme.typography.labelMedium,
+                color = txText,
+            )
+        }
+        Text(
+            stringResource(R.string.network_boot_total) +
+                " ↓ ${Format.bytes(iface.rxBytes)} · ↑ ${Format.bytes(iface.txBytes)}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
 
-/** IPv6 / PD 详情弹窗：分节标题 + 每条可复制（长列表内滚动） */
+/** IPv6 / PD 行：首条 + 截断展示，超一条或超长出现眼睛进详情弹窗 */
 @Composable
-private fun V6DetailDialog(title: String, sections: List<Pair<String, List<String>>>, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                sections.forEach { (section, items) ->
-                    Text(
-                        section,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    items.forEach { CopyableRow(section, it) }
-                }
+private fun IfaceV6Rows(iface: IfaceInfo, onShowV6: () -> Unit, onShowPd: () -> Unit) {
+    if (iface.ipv6Addrs.isNotEmpty() || iface.ipv6Prefix.isNotEmpty()) {
+        // 地址或委派前缀任一非空即显行；地址空时显示 -（眼睛仍可看 PD 分节）
+        val eyeVisible = iface.ipv6Prefix.isNotEmpty() || iface.ipv6Addrs.size > 1
+        val first = iface.ipv6Addrs.firstOrNull()
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            CopyableRow(
+                label = stringResource(R.string.network_ipv6),
+                value = first ?: "-",
+                modifier = Modifier.weight(1f),
+                display = first?.let(::truncate30) ?: "-",
+            )
+            if (eyeVisible) {
+                EyeButton(stringResource(R.string.network_ipv6)) { onShowV6() }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) }
-        },
+        }
+    }
+    if (iface.ipv6PdAssign.isNotEmpty()) {
+        val first = iface.ipv6PdAssign.first()
+        val eyeVisible = iface.ipv6PdAssign.size > 1 || first.length > 30
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            CopyableRow(
+                label = stringResource(R.string.network_ipv6_pd_assign),
+                value = first,
+                modifier = Modifier.weight(1f),
+                display = truncate30(first),
+            )
+            if (eyeVisible) {
+                EyeButton(stringResource(R.string.network_ipv6_pd_assign)) { onShowPd() }
+            }
+        }
+    }
+}
+
+/** 网关/DNS 值条：横向滚动防溢出，浅底 chip 承载（纯展示；IPv4 等行保留复制） */
+@Composable
+private fun SubChip(label: String, value: String) {
+    Text(
+        "$label $value",
+        style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
 
+/** SSID 卡：：SSID 行整行点击复制+ 加密/信道 + 信号档位 + 关联终端数 + 右侧二维码缩略（「放大」） */
 @Composable
-private fun DeviceTab(state: NetworkUiState) {
-    if (state.loading) {
-        CenterContent(spinner = true)
-    } else if (state.deviceGroups.isEmpty() && state.loadFailed) {
-        CenterContent(stringResource(R.string.common_load_failed))
-    } else if (state.deviceGroups.isEmpty()) {
-        CenterContent(stringResource(R.string.network_empty))
-    } else {
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            state.deviceGroups.forEach { group ->
-                item(key = "header_${group.type}") { DeviceGroupHeader(group) }
-                items(group.devices.size, key = { i -> "${group.type}_${group.devices[i].name}" }) { i ->
-                    DeviceCard(group, group.devices[i])
-                }
-            }
-        }
-    }
-}
-
-/** 设备分组标题：类型文案 + 设备数（视觉走共享 GroupHeader，节奏 top 4dp） */
-@Composable
-private fun DeviceGroupHeader(group: DeviceGroup) {
-    val label = stringResource(
-        when (group.type) {
-            "bridge" -> R.string.network_device_type_bridge
-            "ethernet" -> R.string.network_device_type_ethernet
-            "wireless" -> R.string.network_device_type_wireless
-            "vlan" -> R.string.network_device_type_vlan
-            "tunnel" -> R.string.network_device_type_tunnel
-            else -> R.string.network_other
-        },
-    )
-    GroupHeader("${label} (${group.devices.size})", Modifier.padding(top = 4.dp))
-}
-
-@Composable
-private fun DeviceCard(group: DeviceGroup, device: NetDeviceInfo) {
-    val packets = stringResource(R.string.network_packets)
+private fun SsidCard(
+    radio: RadioInfo,
+    iface: WifiIface,
+    assocCount: Int?,
+    secret: WifiSecret?,
+    onRequestWifi: () -> Unit,
+) {
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp)) {
+            // SSID 行整行点击复制（隐式复制惯例，同 CopyableRow 反馈）
             Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(device.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                Badge(
-                    stringResource(if (device.up) R.string.network_up else R.string.network_down),
-                    isError = !device.up,
-                )
-            }
-            // MAC 可复制（绑定/过滤场景）；MTU/端口短枚举纯展示
-            CopyableRow(stringResource(R.string.network_mac), device.mac ?: "-")
-            if (group.type == "bridge" && device.ports.isNotEmpty()) {
-                InfoRow(
-                    stringResource(R.string.network_bridge_ports),
-                    device.ports.joinToString(", "),
-                )
-            }
-            InfoRow(stringResource(R.string.network_mtu), device.mtu?.toString() ?: "-")
-            InfoRow(
-                stringResource(R.string.network_receive),
-                "${Format.bytes(device.rxBytes)} · ${Format.compactCount(device.rxPackets)} $packets",
-            )
-            InfoRow(
-                stringResource(R.string.network_send),
-                "${Format.bytes(device.txBytes)} · ${Format.compactCount(device.txPackets)} $packets",
-            )
-        }
-    }
-}
-
-@Composable
-private fun WirelessTab(state: NetworkUiState) {
-    when {
-        !state.wirelessLoaded && !state.wirelessFailed -> CenterContent(stringResource(R.string.network_wireless_loading))
-        state.radios.isEmpty() && state.wirelessFailed -> CenterContent(stringResource(R.string.common_load_failed))
-        state.radios.isEmpty() -> CenterContent(stringResource(R.string.wifi_no_radio))
-        else -> LazyColumn(
-            Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            items(state.radios.size) { i -> RadioCard(state.radios[i]) }
-        }
-    }
-}
-
-@Composable
-private fun RadioCard(radio: RadioInfo) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp)) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // radio 卡头显示原始名（radio0），不做大写
-                Text(radio.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                // 设置入口目标为 wifi 页（M4/），M3 阶段保留占位不可用
-                TextButton(onClick = {}, enabled = false) {
-                    Text("${stringResource(R.string.device_list_settings)} ›")
-                }
-            }
-            // 复制收敛：只有地址类与值得搜索的芯片名可复制，
-            // 短枚举值（频段/信道/协议）纯展示——避免误触 toast 与无意义复制
-            CopyableRow(stringResource(R.string.network_chip), radio.chip ?: "-")
-            InfoRow(stringResource(R.string.network_band), radio.band ?: "-")
-            InfoRow(stringResource(R.string.network_channel), radio.channel ?: "-")
-            InfoRow(stringResource(R.string.network_protocol), "802.11${radio.hwmodes ?: "-"}")
-            if (radio.ifaces.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                radio.ifaces.forEach { WifiIfaceCard(it) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun WifiIfaceCard(iface: WifiIface) {
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-    ) {
-        Column(Modifier.padding(12.dp)) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable {
+                        clipboard.setText(AnnotatedString(iface.ssid ?: iface.ifname))
+                        Toast.makeText(context, context.getString(R.string.common_copied), Toast.LENGTH_SHORT).show()
+                    },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "SSID: ${iface.ssid ?: "-"}",
+                    iface.ssid ?: iface.ifname,
                     Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleSmall,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                // 模式恒显示（缺失补 -）
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(top = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 Text(
-                    "${stringResource(R.string.network_mode)}: ${iface.mode ?: "-"}",
-                    style = MaterialTheme.typography.bodySmall,
+                    NetworkParsers.encryptionLabel(
+                        iface.encryption,
+                        stringResource(R.string.network_no_encryption),
+                        stringResource(R.string.network_encrypted),
+                    ),
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                radio.channel?.let {
+                    Text(
+                        "Ch $it",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-            CopyableRow(stringResource(R.string.network_bssid), iface.bssid ?: "-")
-            InfoRow(stringResource(R.string.network_signal), "${iface.signal ?: "-"} dBm")
-            iface.bitrate?.let { InfoRow(stringResource(R.string.network_bitrate), Format.bitrate(it)) }
-            InfoRow(
-                stringResource(R.string.network_encryption),
-                NetworkParsers.encryptionLabel(
-                    iface.encryption,
-                    stringResource(R.string.network_no_encryption),
-                    stringResource(R.string.network_encrypted),
-                ),
+            Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    iface.signal?.let { signal ->
+                        SignalBars(signal)
+                        Text(
+                            signalTierText(signal),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    assocCount?.let {
+                        Text(
+                            stringResource(R.string.network_assoc_online, it),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                // 二维码缩略（「放大」）：已认证且个人网显示真码，否则入口图标；点击走认证流
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable(onClick = onRequestWifi),
+                ) {
+                    Surface(
+                        color = Color.White,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.size(54.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            val payload = secret
+                                ?.takeIf { WifiQr.isPersonal(it.encryption) }
+                                ?.let { WifiQr.payload(it.encryption, it.ssid ?: iface.ifname, it.key) }
+                            if (payload != null) {
+                                QrCodeImage(payload, Modifier.size(48.dp))
+                            } else {
+                                Icon(
+                                    Icons.Filled.QrCode2,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(30.dp),
+                                    tint = Color(0xFF333333),
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        stringResource(R.string.wifi_qr_zoom),
+                        Modifier.padding(top = 2.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+            iface.bssid?.let { CopyableRow(stringResource(R.string.network_bssid), it) }
+        }
+    }
+}
+
+/** 系统设备行：名称 + 芯片/承载 sub 行 + UP 徽章（设备分组已滤 DOWN） */
+@Composable
+private fun DeviceRow(device: NetDeviceInfo, carrying: String?, chip: String?) {
+    Card(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(device.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                val sub = listOfNotNull(chip, carrying?.let { stringResource(R.string.network_carrying, it) })
+                if (sub.isNotEmpty()) {
+                    Text(
+                        sub.joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            StatusBadge(
+                stringResource(if (device.up) R.string.network_up else R.string.network_down),
+                if (device.up) BadgeTone.OK else BadgeTone.ERR,
             )
         }
     }
 }
 
 @Composable
-private fun CenterContent(text: String? = null, spinner: Boolean = false) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        when {
-            spinner -> CircularProgressIndicator()
-            text != null -> Text(
-                text,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
+private fun signalTierText(dBm: Int): String = stringResource(
+    when (signalLevel(dBm)) {
+        4 -> R.string.signal_excellent
+        3 -> R.string.signal_good
+        2 -> R.string.signal_fair
+        1 -> R.string.signal_weak
+        else -> R.string.signal_poor
+    },
+)
 
-/** IPv6/PD 行显示值截断：超 30 字符截断加省略号（完整值进弹窗或点击复制） */
-private fun truncate30(s: String): String = if (s.length > 30) s.take(30) + "…" else s
+@Composable
+private fun SectionText(text: String) {
+    Text(
+        text,
+        Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}

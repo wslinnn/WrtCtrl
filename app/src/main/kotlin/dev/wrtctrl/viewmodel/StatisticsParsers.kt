@@ -3,6 +3,7 @@ package dev.wrtctrl.viewmodel
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
+import kotlin.math.roundToLong
 
 data class LoadRow(val ts: Long, val load1: Double, val load5: Double, val load15: Double)
 
@@ -50,6 +51,20 @@ internal object StatisticsParsers {
             average = values.sum() / values.size,
             peak = values.max(),
         )
+    }
+
+    /** 本窗口传输（字节）= 速率曲线的梯形积分 Σ (rᵢ+rᵢ₊₁)/2·Δt，Δt≤0 跳过；
+     *  值/时间戳长度不齐取短者（确定性计算，数据有源——速率采样即来源） */
+    fun windowTransfer(values: List<Double>, timestamps: List<Long>): Long {
+        val n = minOf(values.size, timestamps.size)
+        if (n < 2) return 0L
+        var bytes = 0.0
+        for (i in 0 until n - 1) {
+            val dt = timestamps[i + 1] - timestamps[i]
+            if (dt <= 0) continue
+            bytes += (values[i] + values[i + 1]) / 2.0 * dt
+        }
+        return bytes.roundToLong()
     }
 
     /** 负载值展示：%.2f（对齐旧 toFixed(2)，固定 Locale.US） */

@@ -6,6 +6,8 @@ data class IfaceInfo(
     val name: String,
     val proto: String?,
     val l3Device: String?,
+    /** UP/DOWN 徽章（DOWN 接口保留并显示，附诊断入口） */
+    val up: Boolean,
     val mac: String?,
     val rxBytes: Long,
     val txBytes: Long,
@@ -43,6 +45,8 @@ data class WifiEncryption(
 
 data class WifiIface(
     val ifname: String,
+    /** uci config.network 列表——与 uci section 的 network 交集做关联 */
+    val networks: List<String>,
     val ssid: String?,
     val mode: String?,
     val bssid: String?,
@@ -64,6 +68,15 @@ data class RadioInfo(
     val ifaces: List<WifiIface>,
 )
 
+/** SSID 密码凭据（从 uci wireless 拉取；仅内存，不落盘） */
+data class WifiSecret(
+    val ssid: String?,
+    /** uci 原始 encryption 值（none/psk2/sae/wpa2…），判定个人网与 WIFI 串 type */
+    val encryption: String?,
+    /** 明文密码；开放网 = null */
+    val key: String?,
+)
+
 /**
  * 网络页三个 ubus 响应的纯解析：JSONObject 进、
  * 结构化模型出，无 Android 依赖，JVM 单测覆盖。解析失败返回空/默认值（
@@ -72,28 +85,25 @@ data class RadioInfo(
  */
 internal object NetworkParsers {
 
-    /** 接口卡列表：dump 全部接口按原序取 up!==false 者，loopback 恒排末尾；
-     *  MAC 与收发流量按 l3_device 从 getNetworkDevices 结果补齐。
+    /** 接口卡列表：排序 wan 置顶（默认路由主卡）、lan 次之、其余按名；
+     *  loopback 剔除（零信息量，与首页接口 chips 同口径）。DOWN 保留（带 up 标志——
+     *  异常状态带下一步）；MAC 与收发流量按 l3_device 从 getNetworkDevices 结果补齐。
      *  getNetworkDevices 的响应是以设备名为键的根对象（响应按设备名键控
      *  直接取键），兼容个别固件包一层 result 的形态 */
     fun ifaceList(dump: JSONObject, devices: JSONObject): List<IfaceInfo> {
         val deviceMap = devices.optJSONObject("result") ?: devices
         val arr = dump.optJSONArray("interface") ?: return emptyList()
-        data class Raw(val json: JSONObject, val isLoopback: Boolean)
-        val raws = (0 until arr.length()).mapNotNull { i ->
-            arr.optJSONObject(i)?.let { Raw(it, it.optString("interface") == "loopback") }
-        }
-        return raws
-            .sortedBy { it.isLoopback } // 稳定排序：非 loopback 原序在前，loopback 全部沉底
-            .filter { it.json.optBoolean("up", true) }
-            .map { raw ->
-                val entry = raw.json
+        return (0 until arr.length())
+            .mapNotNull { i -> arr.optJSONObject(i) }
+            .filter { it.optString("interface") != "loopback" }
+            .map { entry ->
                 val l3 = entry.optString("l3_device").takeIf(String::isNotBlank)
                 val dev = l3?.let { deviceMap?.optJSONObject(it) }
                 IfaceInfo(
                     name = entry.optString("interface"),
                     proto = entry.optString("proto").takeIf(String::isNotBlank),
                     l3Device = l3,
+                    up = entry.optBoolean("up", true),
                     mac = dev?.optString("mac")?.takeIf { it.isNotBlank() },
                     rxBytes = dev?.optJSONObject("stats")?.optLong("rx_bytes") ?: 0L,
                     txBytes = dev?.optJSONObject("stats")?.optLong("tx_bytes") ?: 0L,
@@ -108,6 +118,7 @@ internal object NetworkParsers {
                     dns = stringList(entry, "dns-server"),
                 )
             }
+            .sortedWith(compareBy({ it.name != "wan" }, { it.name != "lan" }, { it.name }))
     }
 
     /** 设备分组：按 devtype 归 bridge/ethernet/wireless/vlan/tunnel，未知归 other；
@@ -166,6 +177,7 @@ internal object NetworkParsers {
                     val ifIw = ifEntry.optJSONObject("iwinfo")
                     WifiIface(
                         ifname = ifEntry.optString("ifname"),
+                        networks = ifEntry.optJSONObject("config")?.let { stringList(it, "network") } ?: emptyList(),
                         ssid = ifIw?.optString("ssid")?.takeIf(String::isNotBlank),
                         // iwinfo.mode（Master/Client）优先，config.mode（ap/sta）回落
                         mode = ifIw?.optString("mode")?.takeIf(String::isNotBlank)
@@ -214,6 +226,38 @@ internal object NetworkParsers {
             }
         }.ifEmpty { encrypted }
     }
+
+    /** SSID 凭据（uci wireless）：WrtCore.uciGet 类型化 section 表。section ↔ 运行时 iface 的
+     *  关联与 LuCI getStatus 语义一致：section 自带 ifname 精确匹配优先，否则 network
+     *  列表交集（且 section.device = 当前 radio）。
+     *  读 options 的 ssid/encryption/key（key 空 = 开放网）。null = 无关联 section */
+    fun wifiSecret(
+        sections: JSONObject,
+        radioName: String,
+        ifname: String,
+        networks: List<String>,
+    ): WifiSecret? {
+        val candidates = sections.keys().asSequence()
+            .mapNotNull { sections.optJSONObject(it) }
+            .filter { it.optString("section_type") == "wifi-iface" }
+            .mapNotNull { it.optJSONObject("options") }
+            .filter { it.optString("device") == radioName }
+            .toList()
+        // 旧 wireless.js 同款：section 自带 ifname 精确匹配优先，否则 network 列表交集
+        candidates.firstOrNull { options ->
+            options.optString("ifname").takeIf(String::isNotBlank) == ifname ||
+                networks.any { it in stringList(options, "network") }
+        }?.let { return toWifiSecret(it) }
+        // 兜底（MTK/mtwifi 固件 section 常无 ifname/network 关联字段）：该 radio 下唯一的
+        // wifi-iface 视为同一 SSID——确定性关联而非近似；多候选无法消歧则仍判失败
+        return candidates.singleOrNull()?.let { toWifiSecret(it) }
+    }
+
+    private fun toWifiSecret(options: JSONObject): WifiSecret = WifiSecret(
+        ssid = options.optString("ssid").takeIf(String::isNotBlank),
+        encryption = options.optString("encryption").takeIf(String::isNotBlank),
+        key = options.optString("key").takeIf(String::isNotBlank),
+    )
 
     /** JSON 字符串数组 → 非空串列表（缺键返回空列表） */
     private fun stringList(obj: JSONObject, key: String): List<String> {

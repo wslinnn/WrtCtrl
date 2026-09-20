@@ -10,7 +10,44 @@ import org.junit.Test
 class NetworkParsersTest {
 
     @Test
-    fun `接口解析——loopback 沉底、根对象设备表补 MAC 流量、ULA 后置、PD 分配双形态`() {
+    fun `wifiSecret 关联规则——ifname 精确优先、network 交集、单候选兜底`() {
+        // WrtCore.uciGet 形态：键 = section 名，选项在 options 内；关联与 LuCI getStatus 语义一致
+        val sections = JSONObject(
+            """
+            {"default_radio0":{"name":"default_radio0","section_type":"wifi-iface","anonymous":false,
+              "options":{"device":"radio0","ifname":"wlan0","network":["lan"],"ssid":"ASUS_5G","encryption":"psk2","key":"s3cret;pass"}},
+             "default_radio1":{"name":"default_radio1","section_type":"wifi-iface","anonymous":false,
+              "options":{"device":"radio1","network":["guest"],"ssid":"Guest","encryption":"none"}},
+             "default_radio1b":{"name":"default_radio1b","section_type":"wifi-iface","anonymous":false,
+              "options":{"device":"radio1","network":["guest2"],"ssid":"Guest2","encryption":"psk2","key":"k2"}},
+             "wg0":{"name":"wg0","section_type":"interface","anonymous":false,"options":{}}}
+            """.trimIndent(),
+        )
+        // section 自带 ifname：精确匹配
+        val s0 = NetworkParsers.wifiSecret(sections, "radio0", "wlan0", listOf("lan"))!!
+        assertEquals("ASUS_5G", s0.ssid)
+        assertEquals("psk2", s0.encryption)
+        assertEquals("s3cret;pass", s0.key)
+        // section 无 ifname：network 交集 + 同 radio 关联（多候选可消歧）
+        val s1 = NetworkParsers.wifiSecret(sections, "radio1", "wlan1", listOf("guest"))!!
+        assertEquals("Guest", s1.ssid)
+        assertNull(s1.key)
+        // MTK/mtwifi：section 无 ifname/network 关联字段——radio 下唯一候选兜底
+        val lone = JSONObject(
+            """
+            {"default_rax0":{"name":"default_rax0","section_type":"wifi-iface","anonymous":false,
+              "options":{"device":"rax0","ssid":"MTK","encryption":"psk2","key":"kk"}}}
+            """.trimIndent(),
+        )
+        assertEquals("MTK", NetworkParsers.wifiSecret(lone, "rax0", "rax0", emptyList())!!.ssid)
+        // 多候选无法消歧（network 不交集）→ 失败
+        assertNull(NetworkParsers.wifiSecret(sections, "radio1", "unknown", emptyList()))
+        // 非 wifi-iface section 不参与
+        assertNull(NetworkParsers.wifiSecret(sections, "wg0", "wlan0", listOf("lan")))
+    }
+
+    @Test
+    fun `接口解析——wan 置顶 lan 次之、loopback 剔除、设备表补 MAC 流量、ULA 后置、PD 双形态`() {
         val dump = JSONObject(
             """
             {"interface":[
@@ -22,7 +59,8 @@ class NetworkParsersTest {
                                          {"local-address":{"address":"2409:8154:aa:1::1","mask":"64"}}],
                "dns-server":["192.168.2.1","fe80::1"]},
               {"interface":"loopback","up":true,"proto":"static","l3_device":"lo","ipv4-address":[],"route":[],"dns-server":[]},
-              {"interface":"wan6","up":false,"proto":"dhcpv6","l3_device":"eth0.2"}
+              {"interface":"wan6","up":false,"proto":"dhcpv6","l3_device":"eth0.2"},
+              {"interface":"wan","up":true,"proto":"pppoe","l3_device":"eth0.2","route":[],"dns-server":[]}
             ]}
             """.trimIndent(),
         )
@@ -34,8 +72,11 @@ class NetworkParsersTest {
             """.trimIndent(),
         )
         val ifaces = NetworkParsers.ifaceList(dump, devices)
-        assertEquals(listOf("lan", "loopback"), ifaces.map { it.name }) // wan6 被滤、loopback 沉底
-        val lan = ifaces[0]
+        // 排序：wan 置顶、lan 次之、其余按名；loopback 剔除；DOWN 保留（带 up 标志）
+        assertEquals(listOf("wan", "lan", "wan6"), ifaces.map { it.name })
+        assertEquals(false, ifaces[2].up)
+        assertEquals(true, ifaces[0].up)
+        val lan = ifaces[1]
         assertEquals("AA:BB:CC:DD:EE:FF", lan.mac)
         assertEquals(1024L, lan.rxBytes)
         assertEquals("192.168.2.1/255.255.255.0", lan.ipv4)
@@ -46,7 +87,7 @@ class NetworkParsersTest {
         assertEquals(listOf("2409:8154:aa::/56", "2409:8154:aa:1::1/64"), lan.ipv6PdAssign)
         assertEquals(listOf("192.168.2.1", "fe80::1"), lan.dns)
         assertNull(lan.gateway)
-        assertNull(ifaces[1].mac) // lo 不在设备表
+        assertNull(ifaces[2].mac) // eth0.2 不在设备表
     }
 
     @Test

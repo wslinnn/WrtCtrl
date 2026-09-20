@@ -50,4 +50,26 @@ class StatisticsParsersTest {
         assertEquals("0.40", StatisticsParsers.loadText(0.4))
         assertEquals("1.05", StatisticsParsers.loadText(1.049))
     }
+
+    @Test
+    fun `本窗口传输——梯形积分与守卫`() {
+        // 10 B/s 恒定 3s → 30 B；末段 Δt=0 跳过
+        assertEquals(
+            30L,
+            StatisticsParsers.windowTransfer(
+                listOf(10.0, 10.0, 10.0),
+                listOf(100L, 103L, 103L),
+            ),
+        )
+        // 线性 0→10 B/s over 10s → 50 B
+        assertEquals(
+            50L,
+            StatisticsParsers.windowTransfer(
+                listOf(0.0, 10.0),
+                listOf(0L, 10L),
+            ),
+        )
+        assertEquals(0L, StatisticsParsers.windowTransfer(listOf(1.0), listOf(1L)))
+        assertEquals(0L, StatisticsParsers.windowTransfer(emptyList(), emptyList()))
+    }
 }

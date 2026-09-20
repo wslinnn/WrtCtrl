@@ -26,6 +26,8 @@ data class WifiClient(
     val band: String?,
     /** DHCP 租约合并出的主机名（v4 先、v6 后覆盖） */
     val hostname: String?,
+    /** DHCP v4 租约合并出的 IPv4（无租约 = null，不猜） */
+    val ip: String?,
 )
 
 data class DhcpLease(
@@ -61,8 +63,14 @@ internal object ClientParsers {
         return result.sortedBy { it.first }
     }
 
-    /** 一个无线接口的关联终端：assoclist results 数组 + hostname 合并表 → 客户端列表 */
-    fun clientsOf(ifname: String, band: String?, results: JSONArray, hostnames: Map<String, String>): List<WifiClient> {
+    /** 一个无线接口的关联终端：assoclist results 数组 + hostname/IP 合并表 → 客户端列表 */
+    fun clientsOf(
+        ifname: String,
+        band: String?,
+        results: JSONArray,
+        hostnames: Map<String, String>,
+        ips: Map<String, String>,
+    ): List<WifiClient> {
         return (0 until results.length()).mapNotNull { i ->
             val entry = results.optJSONObject(i) ?: return@mapNotNull null
             val mac = entry.optString("mac").takeIf(String::isNotBlank) ?: return@mapNotNull null
@@ -75,8 +83,31 @@ internal object ClientParsers {
                 ifname = ifname,
                 band = band,
                 hostname = hostnames[mac.uppercase()],
+                ip = ips[mac.uppercase()],
             )
         }
+    }
+
+    /** macaddr 大写 → IPv4（租约 IP 是权威来源；无租约不猜） */
+    fun ipMap(v4: List<DhcpLease>): Map<String, String> {
+        val map = mutableMapOf<String, String>()
+        v4.forEach { lease ->
+            val mac = lease.macaddr?.uppercase() ?: return@forEach
+            if (lease.ip.isNotBlank()) map[mac] = lease.ip
+        }
+        return map
+    }
+
+    /** 静态租约 MAC 集合（WrtCore.uciGet 类型化 section 表：section_type = host，MAC 在 options.mac） */
+    fun staticHostMacs(uciDhcp: JSONObject): Set<String> {
+        val macs = mutableSetOf<String>()
+        for (key in uciDhcp.keys()) {
+            val section = uciDhcp.optJSONObject(key) ?: continue
+            if (section.optString("section_type") != "host") continue
+            section.optJSONObject("options")?.optString("mac")
+                ?.uppercase()?.takeIf(String::isNotBlank)?.let { macs.add(it) }
+        }
+        return macs
     }
 
     /** getDHCPLeases → (v4, v6) 两个租约列表 */
