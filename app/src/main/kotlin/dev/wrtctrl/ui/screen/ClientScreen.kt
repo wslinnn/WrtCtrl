@@ -22,7 +22,6 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -34,13 +33,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.wrtctrl.R
 import dev.wrtctrl.ui.component.CopyableRow
 import dev.wrtctrl.ui.component.InfoRow
+import dev.wrtctrl.ui.component.PollingGate
 import dev.wrtctrl.util.Format
 import dev.wrtctrl.viewmodel.ClientParsers
 import dev.wrtctrl.viewmodel.ClientUiState
@@ -48,7 +45,7 @@ import dev.wrtctrl.viewmodel.ClientViewModel
 import dev.wrtctrl.viewmodel.DhcpLease
 import dev.wrtctrl.viewmodel.WifiClient
 
-/** 客户端页：搜索 + 无线终端 / DHCPv4 / DHCPv6 三 Tab。无轮询。 */
+/** 客户端页：搜索 + 无线终端 / DHCPv4 / DHCPv6 三 Tab。可见时 3s 静默轮询当前 Tab。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ClientScreen(vm: ClientViewModel, deviceId: String?, modifier: Modifier = Modifier) {
@@ -60,22 +57,8 @@ fun ClientScreen(vm: ClientViewModel, deviceId: String?, modifier: Modifier = Mo
         vm.onTab(tab)
     }
     var search by rememberSaveable { mutableStateOf("") }
-    // 可见才轮询：Bottom Tab 选中时本屏才组合（组合级可见），后台再叠加生命周期门控
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> vm.setPollingActive(true)
-                Lifecycle.Event.ON_PAUSE -> vm.setPollingActive(false)
-                else -> {}
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            vm.setPollingActive(false)
-        }
-    }
+    // 可见才轮询：组合级可见（底部 Tab 选中）× 生命周期双门控（共享 PollingGate）
+    PollingGate(onActiveChange = vm::setPollingActive)
 
     Column(modifier) {
         SearchField(search, onSearch = { search = it })
@@ -118,7 +101,7 @@ private fun SearchField(search: String, onSearch: (String) -> Unit) {
         trailingIcon = {
             if (search.isNotEmpty()) {
                 IconButton(onClick = { onSearch("") }) {
-                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.client_search_placeholder))
+                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.client_search_clear))
                 }
             }
         },
@@ -131,6 +114,7 @@ private fun WirelessTab(state: ClientUiState, search: String) {
     val clients = state.wirelessClients.matching(search) { listOf(it.mac, it.hostname) }
     when {
         state.loading -> CenterText(stringResource(R.string.client_wireless_clients_loading))
+        clients.isEmpty() && state.loadFailed -> CenterText(stringResource(R.string.common_load_failed))
         clients.isEmpty() -> CenterText(
             stringResource(
                 if (search.isNotBlank()) R.string.client_no_match else R.string.client_no_wireless_clients,

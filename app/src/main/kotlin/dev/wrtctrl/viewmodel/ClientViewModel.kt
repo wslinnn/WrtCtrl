@@ -1,6 +1,7 @@
 package dev.wrtctrl.viewmodel
 
 import android.app.Application
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.wrtctrl.bridge.WrtCore
@@ -20,19 +21,23 @@ import org.json.JSONObject
 data class ClientUiState(
     /** 无线 Tab 拉取中（v4/v6 走缓存无独立加载态） */
     val loading: Boolean = false,
-    /** 下拉刷新指示（最短 400ms） */
+    /** 下拉刷新指示（总时长 = max(拉取, 400ms)，见 holdRefreshSpin） */
     val refreshing: Boolean = false,
     val wirelessClients: List<WifiClient> = emptyList(),
     val dhcpv4: List<DhcpLease> = emptyList(),
     val dhcpv6: List<DhcpLease> = emptyList(),
+    /** 无线拉取最近一次失败（列表为空时以失败文案区分「没有客户端」） */
+    val loadFailed: Boolean = false,
 )
 
 /**
  * 客户端页状态：按 Tab 拉取。
  * 轮询：页面可见期间每 3s 静默刷新当前 Tab
- * （无线 Tab→接口+租约+assoclist，DHCP Tab→租约双栈），离开页面/后台暂停。
- * DHCP v4/v6 共享一次 getDHCPLeases 调用（旧 dhcpCache/dhcpBusy 语义）；
- * 切设备整页失效；踢人走 core kickClient（hostapd del_client）。
+ * （无线 Tab→接口+租约+assoclist，DHCP Tab→租约双栈），离开页面/后台暂停
+ * （屏幕层 PollingGate 双门控）。
+ * DHCP v4/v6 共享一次 getDHCPLeases 调用（失败不落缓存，成功才写 dhcpCache）；
+ * 拉取失败静默保留旧值；切设备整页失效+ generation 守卫
+ * 丢弃在飞的旧设备响应（含旧设备租约污染新设备缓存）。
  */
 class ClientViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(ClientUiState())
@@ -42,7 +47,10 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
     private var dhcpCache: Pair<List<DhcpLease>, List<DhcpLease>>? = null
     private var dhcpBusy = false
 
-    /** 轮询开关与当前 Tab（页面可见性/生命周期由屏幕层驱动） */
+    /** 设备代次（reqSeq 守卫）：切设备 +1，在飞响应按代次丢弃 */
+    private var generation = 0
+
+    /** 轮询开关与当前 Tab（由屏幕层 PollingGate 驱动） */
     private val pollingActive = MutableStateFlow(false)
     private var polledTab = 0
 
@@ -69,6 +77,7 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
     fun ensureLoaded(deviceId: String?) {
         if (deviceId != loadedDeviceId) {
             loadedDeviceId = deviceId
+            generation++
             dhcpCache = null
             _state.update { ClientUiState() }
             loadWireless()
@@ -82,23 +91,32 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun loadWirelessNow(showLoading: Boolean) {
+        val gen = generation
         if (showLoading) {
             _state.update { it.copy(loading = true) }
         }
+        val radios = ubusSafe("luci-rpc", "getWirelessDevices")
+        if (radios == null) {
+            // 拉取失败：保留旧列表，仅置失败标志供空态分支
+            if (gen == generation) _state.update { it.copy(loading = false, loadFailed = true) }
+            return
+        }
+        val dhcp = ensureDhcp(gen)
+        // 失败时 hostname 合并退化为无主机名（无线列表本身仍可展示）
+        val hostnames = dhcp?.let { (v4, v6) -> ClientParsers.hostnameMap(v4, v6) } ?: emptyMap()
         val clients = mutableListOf<WifiClient>()
-        try {
-            val radios = ubusSafe("luci-rpc", "getWirelessDevices") ?: JSONObject()
-            val (v4, v6) = ensureDhcp()
-            val hostnames = ClientParsers.hostnameMap(v4, v6)
-            ClientParsers.wifiIfaces(radios).forEach { (ifname, band) ->
-                clients += ClientParsers.clientsOf(ifname, band, assocSafe(ifname), hostnames)
-            }
-            _state.update { it.copy(loading = false, wirelessClients = clients, dhcpv4 = v4, dhcpv6 = v6) }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            android.util.Log.w("wrtctrl", "wireless clients load failed: ${e.message}")
-            _state.update { it.copy(loading = false) }
+        ClientParsers.wifiIfaces(radios).forEach { (ifname, band) ->
+            clients += ClientParsers.clientsOf(ifname, band, assocSafe(ifname), hostnames)
+        }
+        if (gen != generation) return
+        _state.update {
+            it.copy(
+                loading = false,
+                wirelessClients = clients,
+                dhcpv4 = dhcp?.first ?: it.dhcpv4,
+                dhcpv6 = dhcp?.second ?: it.dhcpv6,
+                loadFailed = false,
+            )
         }
     }
 
@@ -108,27 +126,25 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             dhcpBusy = true
             try {
-                val (v4, v6) = ensureDhcp()
-                _state.update { it.copy(dhcpv4 = v4, dhcpv6 = v6) }
+                val gen = generation
+                ensureDhcp(gen)?.let { (v4, v6) ->
+                    if (gen == generation) _state.update { it.copy(dhcpv4 = v4, dhcpv6 = v6) }
+                }
             } finally {
                 dhcpBusy = false
             }
         }
     }
 
-    /** 下拉刷新：重拉当前 Tab（无线 Tab 连带刷新 DHCP 缓存），指示器最短 400ms */
+    /** 下拉刷新：重拉当前 Tab（无线 Tab 连带刷新 DHCP 缓存），指示器总时长 = max(数据落地, 400ms) */
     fun refresh(tab: Int) {
         if (_state.value.refreshing) return
         viewModelScope.launch {
             _state.update { it.copy(refreshing = true) }
-            if (tab == 0) {
-                dhcpCache = null
-                loadWireless()
-            } else {
-                dhcpCache = null
-                loadDhcp()
-            }
-            delay(400)
+            val startedAt = SystemClock.elapsedRealtime()
+            dhcpCache = null
+            if (tab == 0) loadWirelessNow(showLoading = false) else refreshDhcp()
+            holdRefreshSpin(startedAt)
             _state.update { it.copy(refreshing = false) }
         }
     }
@@ -136,22 +152,26 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
     /** DHCP Tab 静默强刷（轮询用）：绕过缓存取新租约并更新缓存与状态 */
     private suspend fun refreshDhcp() {
         dhcpCache = null
-        val (v4, v6) = ensureDhcp()
-        _state.update { it.copy(dhcpv4 = v4, dhcpv6 = v6) }
+        val gen = generation
+        val dhcp = ensureDhcp(gen) ?: return
+        if (gen != generation) return
+        _state.update { it.copy(dhcpv4 = dhcp.first, dhcpv6 = dhcp.second) }
     }
 
-    private suspend fun ensureDhcp(): Pair<List<DhcpLease>, List<DhcpLease>> {
+    /** DHCP 双栈租约（带缓存）；null=拉取失败——不落缓存（下次重试）、不覆盖旧值 */
+    private suspend fun ensureDhcp(gen: Int): Pair<List<DhcpLease>, List<DhcpLease>>? {
         dhcpCache?.let { return it }
+        val payload = ubusSafe("luci-rpc", "getDHCPLeases") ?: return null
         val pair = try {
-            val payload = ubusSafe("luci-rpc", "getDHCPLeases") ?: JSONObject()
             ClientParsers.dhcpLeases(payload)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             android.util.Log.w("wrtctrl", "dhcp leases load failed: ${e.message}")
-            emptyList<DhcpLease>() to emptyList()
+            return null
         }
-        dhcpCache = pair
+        // 拉取期间设备已切换：结果不落缓存（旧设备租约会污染新设备的缓存）
+        if (gen == generation) dhcpCache = pair
         return pair
     }
 

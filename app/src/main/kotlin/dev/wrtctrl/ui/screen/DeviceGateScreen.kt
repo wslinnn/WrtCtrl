@@ -56,7 +56,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -90,7 +89,7 @@ import kotlinx.coroutines.launch
 fun DeviceGateScreen(vm: AppViewModel, onOpenLanguage: () -> Unit = {}) {
     // 快速切换场景（从主页顶栏进入）手势返回 = 取消切换回主页；启动/登录失败场景不拦截
     BackHandler(enabled = vm.gateCameFromMain) { vm.returnToMain() }
-    val state by vm.gate.collectAsState()
+    val state by vm.gate.collectAsStateWithLifecycle()
     when (state.mode) {
         GateMode.List -> ListMode(vm, state, onOpenLanguage)
         GateMode.Form -> FormMode(vm, state, onOpenLanguage)

@@ -6,6 +6,7 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -179,7 +180,9 @@ fun WrtTheme(
     seedColor: Color? = null,
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = generateColorScheme(seedColor ?: Color(0xFF0E84B5), darkTheme)
+    // 色板按输入缓存：重建整套 colorScheme 是纯计算，不必每次组合都跑
+    val seed = seedColor ?: Color(0xFF0E84B5)
+    val colorScheme = remember(seed, darkTheme) { generateColorScheme(seed, darkTheme) }
 
     MaterialTheme(
         colorScheme = colorScheme,

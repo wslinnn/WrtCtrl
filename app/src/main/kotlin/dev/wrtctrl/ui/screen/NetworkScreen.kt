@@ -33,23 +33,21 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import dev.wrtctrl.R
 import dev.wrtctrl.ui.component.Badge
+import dev.wrtctrl.ui.component.PollingGate
 import dev.wrtctrl.ui.component.CopyableRow
 import dev.wrtctrl.ui.component.InfoRow
 import dev.wrtctrl.util.Format
@@ -62,34 +60,20 @@ import dev.wrtctrl.viewmodel.NetworkViewModel
 import dev.wrtctrl.viewmodel.RadioInfo
 import dev.wrtctrl.viewmodel.WifiIface
 
-/** 网络页：接口 / 设备 / 无线三视角。无轮询，进页/下拉刷新拉取。 */
+/** 网络页：接口 / 设备 / 无线三视角。可见时 3s 静默轮询当前 Tab。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NetworkScreen(vm: NetworkViewModel, deviceId: String?, modifier: Modifier = Modifier) {
     val state by vm.state.collectAsStateWithLifecycle()
     LaunchedEffect(deviceId) { vm.ensureLoaded(deviceId) }
-    var tab by remember { mutableIntStateOf(0) }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     // 无线数据首进该 Tab 才拉（loadWireless 自带 wirelessLoaded 门）+ 轮询目标上报
     LaunchedEffect(tab) {
         if (tab == 2) vm.loadWireless()
         vm.onTab(tab)
     }
-    // 可见才轮询：Bottom Tab 选中时本屏才组合（组合级可见），后台再叠加生命周期门控
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> vm.setPollingActive(true)
-                Lifecycle.Event.ON_PAUSE -> vm.setPollingActive(false)
-                else -> {}
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            vm.setPollingActive(false)
-        }
-    }
+    // 可见才轮询：组合级可见（底部 Tab 选中）× 生命周期双门控（共享 PollingGate）
+    PollingGate(onActiveChange = vm::setPollingActive)
     Column(modifier) {
         val tabs = listOf(
             R.string.network_interfaces,
@@ -123,6 +107,8 @@ fun NetworkScreen(vm: NetworkViewModel, deviceId: String?, modifier: Modifier = 
 private fun IfaceTab(state: NetworkUiState) {
     if (state.loading) {
         CenterContent(spinner = true)
+    } else if (state.ifaces.isEmpty() && state.loadFailed) {
+        CenterContent(stringResource(R.string.common_load_failed))
     } else if (state.ifaces.isEmpty()) {
         CenterContent(stringResource(R.string.network_empty))
     } else {
@@ -172,7 +158,7 @@ private fun IfaceCard(iface: IfaceInfo) {
                         display = first?.let(::truncate30) ?: "-",
                     )
                     if (eyeVisible) {
-                        EyeButton { showV6Dialog = true }
+                        EyeButton(stringResource(R.string.network_ipv6)) { showV6Dialog = true }
                     }
                 }
             }
@@ -187,7 +173,7 @@ private fun IfaceCard(iface: IfaceInfo) {
                         display = truncate30(first),
                     )
                     if (eyeVisible) {
-                        EyeButton { showPdDialog = true }
+                        EyeButton(stringResource(R.string.network_ipv6_pd_assign)) { showPdDialog = true }
                     }
                 }
             }
@@ -217,11 +203,11 @@ private fun IfaceCard(iface: IfaceInfo) {
 }
 
 @Composable
-private fun EyeButton(onClick: () -> Unit) {
+private fun EyeButton(contentDescription: String, onClick: () -> Unit) {
     IconButton(onClick = onClick, modifier = Modifier.size(32.dp)) {
         Icon(
             Icons.Filled.Visibility,
-            contentDescription = stringResource(R.string.network_ipv6),
+            contentDescription = contentDescription,
             modifier = Modifier.size(18.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -256,6 +242,8 @@ private fun V6DetailDialog(title: String, sections: List<Pair<String, List<Strin
 private fun DeviceTab(state: NetworkUiState) {
     if (state.loading) {
         CenterContent(spinner = true)
+    } else if (state.deviceGroups.isEmpty() && state.loadFailed) {
+        CenterContent(stringResource(R.string.common_load_failed))
     } else if (state.deviceGroups.isEmpty()) {
         CenterContent(stringResource(R.string.network_empty))
     } else {
@@ -338,7 +326,8 @@ private fun DeviceCard(group: DeviceGroup, device: NetDeviceInfo) {
 @Composable
 private fun WirelessTab(state: NetworkUiState) {
     when {
-        !state.wirelessLoaded -> CenterContent(stringResource(R.string.network_wireless_loading))
+        !state.wirelessLoaded && !state.wirelessFailed -> CenterContent(stringResource(R.string.network_wireless_loading))
+        state.radios.isEmpty() && state.wirelessFailed -> CenterContent(stringResource(R.string.common_load_failed))
         state.radios.isEmpty() -> CenterContent(stringResource(R.string.wifi_no_radio))
         else -> LazyColumn(
             Modifier.fillMaxSize(),

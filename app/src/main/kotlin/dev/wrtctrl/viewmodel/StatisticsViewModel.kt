@@ -1,6 +1,7 @@
 package dev.wrtctrl.viewmodel
 
 import android.app.Application
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.wrtctrl.bridge.WrtCore
@@ -43,6 +44,8 @@ class StatisticsViewModel(application: Application) : AndroidViewModel(applicati
     val state: StateFlow<StatisticsUiState> = _state
 
     private var loadedDeviceId: String? = null
+    /** 设备/接口代次（reqSeq 守卫）：切设备或切接口 +1，在飞响应按代次丢弃 */
+    private var generation = 0
     private val pollingActive = MutableStateFlow(false)
     private var polledTab = 0
 
@@ -67,19 +70,24 @@ class StatisticsViewModel(application: Application) : AndroidViewModel(applicati
     fun ensureLoaded(deviceId: String?) {
         if (deviceId == loadedDeviceId) return
         loadedDeviceId = deviceId
+        generation++
         _state.update { StatisticsUiState() }
         viewModelScope.launch {
+            val gen = generation
             val devices = ubusSafe("luci-rpc", "getNetworkDevices") ?: JSONObject()
             val options = StatisticsParsers.interfaceOptions(devices)
             val initial = options.firstOrNull { it == "br-lan" } ?: options.firstOrNull()
+            if (gen != generation) return@launch
             _state.update { it.copy(interfaces = options, selectedDevice = initial) }
-            initial?.let { fetchBandwidth() }
-            fetchLoad()
+            initial?.let { fetchBandwidth(gen) }
+            fetchLoad(gen)
         }
     }
 
     fun selectDevice(name: String) {
         if (_state.value.selectedDevice == name) return
+        // 接口切换同样走代次失效：旧接口的在飞带宽响应不得回填新接口的空曲线
+        generation++
         _state.update { it.copy(selectedDevice = name, rxSeries = emptyList(), txSeries = emptyList(), bwTimestamps = emptyList()) }
         viewModelScope.launch { fetchBandwidth() }
     }
@@ -88,18 +96,20 @@ class StatisticsViewModel(application: Application) : AndroidViewModel(applicati
         if (_state.value.refreshing) return
         viewModelScope.launch {
             _state.update { it.copy(refreshing = true) }
+            val startedAt = SystemClock.elapsedRealtime()
             if (tab == 0) fetchBandwidth() else fetchLoad()
-            delay(400)
+            holdRefreshSpin(startedAt)
             _state.update { it.copy(refreshing = false) }
         }
     }
 
-    private suspend fun fetchBandwidth() {
+    private suspend fun fetchBandwidth(gen: Int = generation) {
         val device = _state.value.selectedDevice ?: return
         try {
             val payload = ubusSafe("luci", "getRealtimeStats", JSONObject().put("mode", "interface").put("device", device))
                 ?.optJSONArray("result") ?: JSONArray()
             val series = Format.bandwidthRates(payload)
+            if (gen != generation) return
             if (series.rx.isEmpty()) {
                 _state.update { it.copy(bwLoading = false) }
                 return
@@ -115,15 +125,16 @@ class StatisticsViewModel(application: Application) : AndroidViewModel(applicati
             throw e
         } catch (e: Exception) {
             android.util.Log.w("wrtctrl", "bandwidth stats failed: ${e.message}")
-            _state.update { it.copy(bwLoading = false) }
+            if (gen == generation) _state.update { it.copy(bwLoading = false) }
         }
     }
 
-    private suspend fun fetchLoad() {
+    private suspend fun fetchLoad(gen: Int = generation) {
         try {
             val payload = ubusSafe("luci", "getRealtimeStats", JSONObject().put("mode", "load"))
                 ?.optJSONArray("result")
             val rows = payload?.let(StatisticsParsers::loadRows) ?: emptyList()
+            if (gen != generation) return
             // 墙钟锚定同带宽：最后采样 ≈ 本次拉取时刻（ts 语义随固件而异）
             val shift = System.currentTimeMillis() / 1000 - (rows.lastOrNull()?.ts ?: 0L)
             val anchored = rows.map { it.copy(ts = it.ts + shift) }
@@ -132,7 +143,7 @@ class StatisticsViewModel(application: Application) : AndroidViewModel(applicati
             throw e
         } catch (e: Exception) {
             android.util.Log.w("wrtctrl", "load stats failed: ${e.message}")
-            _state.update { it.copy(loadLoading = false) }
+            if (gen == generation) _state.update { it.copy(loadLoading = false) }
         }
     }
 

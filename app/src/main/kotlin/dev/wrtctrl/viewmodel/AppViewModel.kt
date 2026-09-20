@@ -1,6 +1,7 @@
 package dev.wrtctrl.viewmodel
 
 import android.app.Application
+import android.os.SystemClock
 import androidx.annotation.StringRes
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -17,7 +18,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -104,8 +104,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 连接并校验会话：探活失败自动用存储凭证重登 */
     private suspend fun activate(device: Device): Boolean = try {
-        // LAN 目标先绑定覆盖网络再连接（默认网络可能不覆盖私网段，见 NetBinder 注释）
-        android.util.Log.i("wrtctrl", "netbind: ${NetBinder.bindForHost(getApplication(), device.host)}")
+        // LAN 目标先绑定覆盖网络再连接（默认网络可能不覆盖私网段，见 NetBinder 注释）；
+        // 绑定失败不阻断登录（与 submit 同款防御，描述串进 logcat）
+        val netDesc = try {
+            NetBinder.bindForHost(getApplication(), device.host)
+        } catch (e: Exception) {
+            "binder error: ${e.message}"
+        }
+        android.util.Log.i("wrtctrl", "netbind: $netDesc")
         WrtCore.setDevice(device.baseUrl, device.username, device.password, null)
         WrtCore.reconnect()
         _current.value = device
@@ -176,18 +182,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** 列表下拉刷新：重读设备 + 重跑并行探活（pings 清空回到"检测中"态）；不动 phase 与快速切换标记。
-     *  指示器最短展示 400ms：repo.list() 毫秒级完成，isRefreshing true→false 切换过快会让
-     *  M3 PullToRefreshBox 指示器停在外面不回弹（首页拉取走网络耗时长故无此现象）。 */
+     *  指示器时长 = max(设备表读取, 400ms)（统一语义见 holdRefreshSpin）；探活并行渐进更新徽章，不占指示器。 */
     fun refreshDeviceList() {
         if (_gate.value.refreshing) return
         viewModelScope.launch {
             _gate.update { it.copy(refreshing = true) }
+            val startedAt = SystemClock.elapsedRealtime()
             val devices = repo.list()
             _gate.update {
                 it.copy(devices = devices, pings = emptyMap(), bannerError = null)
             }
             pingAll(devices)
-            delay(400)
+            holdRefreshSpin(startedAt)
             _gate.update { it.copy(refreshing = false) }
         }
     }
@@ -242,8 +248,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteDevice(id: String) {
         viewModelScope.launch {
             repo.delete(id)
-            // 删除的是当前连接设备时同步清 _current，否则列表徽章仍显示「当前」
-            if (_current.value?.id == id) _current.value = null
+            // 删除的是当前连接设备：清 _current（列表徽章），并取消「手势返回回主页」——
+            // 会话已不存在，回主界面只会轮询出已删设备的幽灵数据，返回语义回归冷启动门控
+            if (_current.value?.id == id) {
+                _current.value = null
+                gateCameFromMain = false
+            }
             val devices = repo.list()
             _gate.update {
                 it.copy(

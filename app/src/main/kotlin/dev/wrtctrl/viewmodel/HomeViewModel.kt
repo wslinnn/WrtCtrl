@@ -10,7 +10,6 @@ import dev.wrtctrl.data.DashboardPrefs
 import dev.wrtctrl.util.Format
 import dev.wrtctrl.util.Format.bandwidthRates
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -60,6 +59,8 @@ data class HomeUiState(
     val cardOrder: List<DashboardCardId> = DashboardPrefs.DEFAULT.order,
     val cardEnabled: Set<DashboardCardId> = DashboardPrefs.DEFAULT.enabled,
     val collapsed: Set<DashboardCardId> = DashboardPrefs.DEFAULT.collapsed,
+    /** DataStore 持久化值已落地（编辑页以此为界同步本地初值，见 DashboardEditScreen） */
+    val cardConfigLoaded: Boolean = false,
     /** 下拉刷新进行中 */
     val refreshing: Boolean = false,
 )
@@ -67,8 +68,9 @@ data class HomeUiState(
 /**
  * 首页仪表盘轮询：每 3s 一次并发 8 项（board / info / conntrack×2 / iface dump /
  * getTempInfo / getMountPoints / getCPUUsage）+ 带宽差分（getRealtimeStats）。
- * getCPUUsage 为 部分回退（CPU 环需求，见 ；轮询绑定本 ViewModel
- * 生命周期：离开主界面自动停止（行为偏差表 B1 修复的延伸）。
+ * 
+ * 轮询门控：pollingActive 默认关，由屏幕层 PollingGate 驱动（组合可见 × 前台）；
+ * 循环先等一个周期再刷——进页/切设备的立即拉取（switchDevice）不与之重复。
  * 带宽目标 = wan 优先（l3_device），无 wan 回落 br-lan（旧 getQuickBandwidthTarget）。
  * 解析逻辑全部在 HomeParsers（纯函数，JVM 单测覆盖）。
  */
@@ -80,21 +82,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val dashboardPrefs = DashboardPrefs(application)
     private var loadedDeviceId: String? = null
 
-    /** 切换设备：重置回 loading 过渡态（与进 app 一致）并立即补一轮拉取——
-     *  否则旧设备数据要挂到下个 3s 轮询节拍才被新数据覆盖，观感是"变化很慢"。
-     *  卡片自定义三件套（顺序/显隐/折叠）跨设备保留 */
-    fun switchDevice(deviceId: String?) {
-        if (deviceId == loadedDeviceId) return
-        loadedDeviceId = deviceId
-        bandwidthDevice = null
-        _state.update {
-            HomeUiState(cardOrder = it.cardOrder, cardEnabled = it.cardEnabled, collapsed = it.collapsed)
-        }
-        viewModelScope.launch { pollOnce() }
-    }
+    /** 设备代次（reqSeq 守卫）：切设备 +1，在飞响应按代次丢弃，防旧设备数据覆盖新设备首拉 */
+    private var generation = 0
 
-    /** 轮询开关（B1 完整落地）：页面可见才轮询；用 StateFlow 让挂起的循环能被唤醒 */
-    private val pollingActive = MutableStateFlow(true)
+    /** 轮询开关：页面可见才轮询（由 HomeScreen 的 PollingGate 驱动） */
+    private val pollingActive = MutableStateFlow(false)
 
     fun setPollingActive(active: Boolean) {
         pollingActive.value = active
@@ -103,10 +95,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     init {
         viewModelScope.launch {
             while (viewModelScope.isActive) {
-                // 不可见时在此挂起（不占任何资源），回到可见立即拉一轮
+                // 不可见时在此挂起（不占任何资源），回到可见等一个周期再刷
                 pollingActive.first { it }
+                delay(POLL_INTERVAL)
                 pollOnce()
-                delay(3000)
             }
         }
         viewModelScope.launch {
@@ -116,10 +108,30 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         cardOrder = config.order,
                         cardEnabled = config.enabled,
                         collapsed = config.collapsed,
+                        cardConfigLoaded = true,
                     )
                 }
             }
         }
+    }
+
+    /** 切换设备：重置回 loading 过渡态（与进 app 一致）并立即补一轮拉取——
+     *  否则旧设备数据要挂到下个 3s 轮询节拍才被新数据覆盖，观感是"变化很慢"。
+     *  卡片自定义三件套（顺序/显隐/折叠）跨设备保留 */
+    fun switchDevice(deviceId: String?) {
+        if (deviceId == loadedDeviceId) return
+        loadedDeviceId = deviceId
+        generation++
+        bandwidthDevice = null
+        _state.update {
+            HomeUiState(
+                cardOrder = it.cardOrder,
+                cardEnabled = it.cardEnabled,
+                collapsed = it.collapsed,
+                cardConfigLoaded = it.cardConfigLoaded,
+            )
+        }
+        viewModelScope.launch { pollOnce() }
     }
 
     /** 编辑页即时保存（顺序 + 显隐；折叠态保持当前值不被动） */
@@ -150,6 +162,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun pollOnce() {
+        val gen = generation
         val poll = coroutineScope {
             val board = async { ubusSafe("system", "board") }
             val info = async { ubusSafe("system", "info") }
@@ -164,37 +177,39 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 ifaceDump.await(), temp.await(), mounts.await(), cpu.await(),
             )
         }
-
-        _state.update { state ->
-            state.copy(
-                loading = false,
-                model = poll.board?.let(HomeParsers::model) ?: state.model,
-                hostname = poll.board?.optString("hostname", state.hostname) ?: state.hostname,
-                version = poll.board?.let(HomeParsers::versionString) ?: state.version,
-                architecture = poll.board?.optString("system", state.architecture) ?: state.architecture,
-                target = poll.board?.optJSONObject("release")?.optString("target", state.target) ?: state.target,
-                uptime = poll.info?.optLong("uptime")?.let(Format::duration) ?: state.uptime,
-                load = poll.info?.let(HomeParsers::load) ?: state.load,
-                cpuPercent = poll.cpu?.let(HomeParsers::cpuPercent) ?: state.cpuPercent,
-                tempC = poll.temp?.let(HomeParsers::tempC) ?: state.tempC,
-                memoryPercent = poll.info?.let(HomeParsers::memoryPercent) ?: state.memoryPercent,
-                memoryDetail = poll.info?.let(HomeParsers::memoryDetail) ?: state.memoryDetail,
-                connections = HomeParsers.connectionsText(poll.connCount, poll.connMax) ?: state.connections,
-                wanIp = poll.ifaceDump?.let(HomeParsers::wanIp) ?: state.wanIp,
-                lanIp = poll.ifaceDump?.let(HomeParsers::lanIp) ?: state.lanIp,
-                gateway = poll.ifaceDump?.let(HomeParsers::gateway) ?: state.gateway,
-                dns = poll.ifaceDump?.let(HomeParsers::dns) ?: state.dns,
-                // 内容不变的列表保持同实例：引用稳定才能让未变化的卡在重组中被跳过
-                mounts = poll.mounts?.let(HomeParsers::mountList)
-                    ?.takeIf { it != state.mounts } ?: state.mounts,
-            )
-        }
+        // 拉取期间设备已切换：整轮丢弃（失败项保留旧值语义不变）
+        if (gen != generation) return
+        _state.update { applyPoll(it, poll) }
 
         // 带宽依赖 iface dump 的目标设备
-        poll.ifaceDump?.let { fetchBandwidth(it) }
+        poll.ifaceDump?.let { fetchBandwidth(it, gen) }
     }
 
-    private suspend fun fetchBandwidth(ifaceDump: JSONObject) {
+    /** 一轮拉取结果 → 状态字段映射：各字段失败/缺失时保留旧值（静默保留） */
+    private fun applyPoll(state: HomeUiState, poll: HomePoll): HomeUiState = state.copy(
+        loading = false,
+        model = poll.board?.let(HomeParsers::model) ?: state.model,
+        hostname = poll.board?.optString("hostname", state.hostname) ?: state.hostname,
+        version = poll.board?.let(HomeParsers::versionString) ?: state.version,
+        architecture = poll.board?.optString("system", state.architecture) ?: state.architecture,
+        target = poll.board?.optJSONObject("release")?.optString("target", state.target) ?: state.target,
+        uptime = poll.info?.optLong("uptime")?.let(Format::duration) ?: state.uptime,
+        load = poll.info?.let(HomeParsers::load) ?: state.load,
+        cpuPercent = poll.cpu?.let(HomeParsers::cpuPercent) ?: state.cpuPercent,
+        tempC = poll.temp?.let(HomeParsers::tempC) ?: state.tempC,
+        memoryPercent = poll.info?.let(HomeParsers::memoryPercent) ?: state.memoryPercent,
+        memoryDetail = poll.info?.let(HomeParsers::memoryDetail) ?: state.memoryDetail,
+        connections = HomeParsers.connectionsText(poll.connCount, poll.connMax) ?: state.connections,
+        wanIp = poll.ifaceDump?.let(HomeParsers::wanIp) ?: state.wanIp,
+        lanIp = poll.ifaceDump?.let(HomeParsers::lanIp) ?: state.lanIp,
+        gateway = poll.ifaceDump?.let(HomeParsers::gateway) ?: state.gateway,
+        dns = poll.ifaceDump?.let(HomeParsers::dns) ?: state.dns,
+        // 内容不变的列表保持同实例：引用稳定才能让未变化的卡在重组中被跳过
+        mounts = poll.mounts?.let(HomeParsers::mountList)
+            ?.takeIf { it != state.mounts } ?: state.mounts,
+    )
+
+    private suspend fun fetchBandwidth(ifaceDump: JSONObject, gen: Int) {
         val interfaces = ifaceDump.optJSONArray("interface") ?: return
         var wanDevice: String? = null
         for (i in 0 until interfaces.length()) {
@@ -244,6 +259,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val wallNowSec = System.currentTimeMillis() / 1000
         val shiftSec = wallNowSec - ts.last()
         val wallTs = ts.map { it + shiftSec }
+        if (gen != generation) return
         _state.update {
             it.copy(
                 rxSeries = rx.toList(),
@@ -283,4 +299,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val mounts: JSONObject?,
         val cpu: JSONObject?,
     )
+
+    private companion object {
+        /** 轮询周期：与其他数据页一致（可见时静默刷新） */
+        const val POLL_INTERVAL = 3000L
+    }
 }

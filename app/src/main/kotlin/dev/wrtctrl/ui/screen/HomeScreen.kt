@@ -33,7 +33,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -56,9 +55,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
 import com.patrykandpatrick.vico.compose.cartesian.AutoScrollCondition
 import com.patrykandpatrick.vico.compose.cartesian.Scroll
@@ -78,6 +74,8 @@ import com.patrykandpatrick.vico.compose.common.Fill
 import com.patrykandpatrick.vico.compose.common.component.rememberTextComponent
 import dev.wrtctrl.R
 import dev.wrtctrl.data.DashboardCardId
+import dev.wrtctrl.ui.component.PollingGate
+import dev.wrtctrl.ui.theme.ChartColors
 import dev.wrtctrl.util.Format
 import dev.wrtctrl.viewmodel.HomeUiState
 import dev.wrtctrl.viewmodel.HomeViewModel
@@ -87,15 +85,7 @@ import java.util.Locale
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
-private const val RX_COLOR = 0xFF4FACFE
-private const val TX_COLOR = 0xFF00C4CC
-
-// 面积填充用纯色半透明（约 18%）：shader 渐变在 3s 高频刷新下会出现渲染斑点，纯色走 Paint 直绘
-private const val RX_AREA = 0x2E4FACFE
-private const val TX_AREA = 0x2800C4CC
-
-// 语义警示色（环组）：CPU/温度越限时的橙→深橙渐变，替代品牌蓝青渐变以传达健康信号
-private val WARNING_COLORS = listOf(Color(0xFFFFB300), Color(0xFFF4511E))
+// 图表/环组/用量条配色统一走 ChartColors（品牌蓝青 + 越限警示橙，见该文件注释）
 
 // 越限阈值：CPU 使用率 ≥85%，温度环百分比 ≥80%（即 ≥80℃，映射区间 40–90℃）
 private const val WARNING_PERCENT = 85
@@ -119,19 +109,8 @@ private data class RingSpec(
 @Composable
 fun HomeScreen(vm: HomeViewModel, modifier: Modifier = Modifier) {
     val state by vm.state.collectAsStateWithLifecycle()
-    // 页面不可见（息屏/退后台/切到覆盖页）即停轮询，回到前台立即恢复
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> vm.setPollingActive(true)
-                Lifecycle.Event.ON_PAUSE -> vm.setPollingActive(false)
-                else -> Unit
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
+    // 页面不可见（息屏/退后台/切到其他底部 Tab/覆盖页）即停轮询，回到前台立即恢复
+    PollingGate(onActiveChange = vm::setPollingActive)
     if (state.loading) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(
@@ -197,8 +176,8 @@ private fun DashboardCardBody(
             summary = "↓ ${Format.rate(state.rxRate)} ↑ ${Format.rate(state.txRate)}",
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                RateBlock(label = "↓ RX", rate = state.rxRate, color = Color(RX_COLOR))
-                RateBlock(label = "↑ TX", rate = state.txRate, color = Color(TX_COLOR))
+                RateBlock(label = "↓ RX", rate = state.rxRate, color = ChartColors.rx)
+                RateBlock(label = "↑ TX", rate = state.txRate, color = ChartColors.tx)
             }
             BandwidthChart(
                 rx = state.rxSeries,
@@ -412,11 +391,11 @@ private fun UsageBar(percent: Int, modifier: Modifier = Modifier) {
         val w = size.width * (percent / 100f).coerceIn(0f, 1f)
         when {
             w > size.height / 2f -> drawRoundRect(
-                brush = Brush.horizontalGradient(listOf(Color(RX_COLOR), Color(TX_COLOR))),
+                brush = Brush.horizontalGradient(listOf(ChartColors.rx, ChartColors.tx)),
                 size = Size(w, size.height),
                 cornerRadius = CornerRadius(radius, radius),
             )
-            w > 0f -> drawCircle(color = Color(TX_COLOR), radius = radius, center = Offset(radius, radius))
+            w > 0f -> drawCircle(color = ChartColors.tx, radius = radius, center = Offset(radius, radius))
         }
     }
 }
@@ -440,7 +419,7 @@ private fun Ring(
     )
     val track = if (isSystemInDarkTheme()) Color(0xFF2A2C31) else Color(0xFFF1F2F5)
     // 越限（CPU/内存/温度告警阈值）切换橙红警示渐变，传达健康信号；常规为品牌蓝青
-    val brush = Brush.linearGradient(if (warning) WARNING_COLORS else listOf(Color(RX_COLOR), Color(TX_COLOR)))
+    val brush = Brush.linearGradient(if (warning) ChartColors.warning else listOf(ChartColors.rx, ChartColors.tx))
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val stroke = size.minDimension * 0.11f
@@ -562,13 +541,13 @@ private fun BandwidthChart(
             val lineProvider = remember {
                 LineCartesianLayer.LineProvider.series(
                     LineCartesianLayer.Line(
-                        fill = LineCartesianLayer.LineFill.single(Fill(Color(RX_COLOR))),
-                        areaFill = LineCartesianLayer.AreaFill.single(Fill(Color(RX_AREA))),
+                        fill = LineCartesianLayer.LineFill.single(Fill(ChartColors.rx)),
+                        areaFill = LineCartesianLayer.AreaFill.single(Fill(ChartColors.rxArea)),
                         interpolator = LineCartesianLayer.Interpolator.cubic(),
                     ),
                     LineCartesianLayer.Line(
-                        fill = LineCartesianLayer.LineFill.single(Fill(Color(TX_COLOR))),
-                        areaFill = LineCartesianLayer.AreaFill.single(Fill(Color(TX_AREA))),
+                        fill = LineCartesianLayer.LineFill.single(Fill(ChartColors.tx)),
+                        areaFill = LineCartesianLayer.AreaFill.single(Fill(ChartColors.txArea)),
                         interpolator = LineCartesianLayer.Interpolator.cubic(),
                     ),
                 )

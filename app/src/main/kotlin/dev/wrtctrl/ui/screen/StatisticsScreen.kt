@@ -27,22 +27,19 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.patrykandpatrick.vico.compose.cartesian.AutoScrollCondition
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
@@ -63,6 +60,8 @@ import com.patrykandpatrick.vico.compose.common.Fill
 import com.patrykandpatrick.vico.compose.common.component.rememberTextComponent
 import dev.wrtctrl.R
 import dev.wrtctrl.ui.component.InfoRow
+import dev.wrtctrl.ui.component.PollingGate
+import dev.wrtctrl.ui.theme.ChartColors
 import dev.wrtctrl.util.Format
 import dev.wrtctrl.viewmodel.StatisticsParsers
 import dev.wrtctrl.viewmodel.StatisticsUiState
@@ -79,23 +78,10 @@ import kotlin.math.roundToLong
 fun StatisticsScreen(vm: StatisticsViewModel, deviceId: String?, modifier: Modifier = Modifier) {
     val state by vm.state.collectAsStateWithLifecycle()
     LaunchedEffect(deviceId) { vm.ensureLoaded(deviceId) }
-    var tab by remember { mutableIntStateOf(0) }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     LaunchedEffect(tab) { vm.onTab(tab) }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> vm.setPollingActive(true)
-                Lifecycle.Event.ON_PAUSE -> vm.setPollingActive(false)
-                else -> {}
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            vm.setPollingActive(false)
-        }
-    }
+    // 可见才轮询：组合级可见（底部 Tab 选中）× 生命周期双门控（共享 PollingGate）
+    PollingGate(onActiveChange = vm::setPollingActive)
     Column(modifier) {
         val tabs = listOf(R.string.statistics_bandwidth, R.string.statistics_load)
         TabRow(selectedTabIndex = tab) {
@@ -155,8 +141,9 @@ private fun BandwidthTab(state: StatisticsUiState, onSelect: (String) -> Unit) {
                 Column(Modifier.padding(12.dp)) {
                     val inbound = stringResource(R.string.statistics_inbound)
                     val outbound = stringResource(R.string.statistics_outbound)
-                    val cRx = MaterialTheme.colorScheme.primary
-                    val cTx = MaterialTheme.colorScheme.tertiary
+                    // 带宽双色与首页图表统一（品牌蓝青，见 ChartColors）；负载三线保持主题色
+                    val cRx = ChartColors.rx
+                    val cTx = ChartColors.tx
                     LegendRow(listOf(cRx to inbound, cTx to outbound))
                     Spacer(Modifier.height(8.dp))
                     Row(Modifier.fillMaxWidth()) {
@@ -180,11 +167,14 @@ private fun BandwidthTab(state: StatisticsUiState, onSelect: (String) -> Unit) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     } else {
+                        // lines/colors 以数据为键 remember：组合体内联 listOf 每次重组都是新实例，
+                        // 会让 MultiLineChart 的 LaunchedEffect(lines)/remember(colors) 空转重跑
+                        val lines = remember(state.rxSeries, state.txSeries) { listOf(state.rxSeries, state.txSeries) }
                         MultiLineChart(
-                            lines = listOf(state.rxSeries, state.txSeries),
+                            lines = lines,
                             lineLabels = listOf(inbound, outbound),
                             timestamps = state.bwTimestamps,
-                            colors = listOf(cRx, cTx),
+                            colors = remember { listOf(cRx, cTx) },
                             yFormatter = { Format.rate(it.roundToLong()) },
                         )
                     }
@@ -256,15 +246,16 @@ private fun LoadTab(state: StatisticsUiState) {
                             )
                         }
                         Spacer(Modifier.height(8.dp))
+                        // 同带宽 Tab：由行数据派生的列表 remember，避免每次重组重建实例
+                        val rows = state.loadRows
+                        val lines = remember(rows) {
+                            listOf(rows.map { it.load1 }, rows.map { it.load5 }, rows.map { it.load15 })
+                        }
                         MultiLineChart(
-                            lines = listOf(
-                                state.loadRows.map { it.load1 },
-                                state.loadRows.map { it.load5 },
-                                state.loadRows.map { it.load15 },
-                            ),
+                            lines = lines,
                             lineLabels = listOf(label1, label5, label15),
-                            timestamps = state.loadRows.map { it.ts },
-                            colors = listOf(c1, c5, c15),
+                            timestamps = remember(rows) { rows.map { it.ts } },
+                            colors = remember(c1, c5, c15) { listOf(c1, c5, c15) },
                             yFormatter = { StatisticsParsers.loadText(it) },
                         )
                     }

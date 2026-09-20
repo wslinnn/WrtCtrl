@@ -53,9 +53,17 @@ private fun cardTitleRes(id: DashboardCardId): Int = when (id) {
 fun DashboardEditScreen(vm: HomeViewModel, onBack: () -> Unit) {
     BackHandler(onBack = onBack)
     val state by vm.state.collectAsStateWithLifecycle()
-    // 本地编辑态：以 DataStore 加载值为初值，之后仅由本页修改并即时写回
-    var order by remember(state.cardOrder) { mutableStateOf(state.cardOrder) }
-    var enabled by remember(state.cardEnabled) { mutableStateOf(state.cardEnabled) }
+    // 本地编辑态：初值 snapshot 一次；DataStore 持久化值落地（cardConfigLoaded）后再同步一次
+    // （秒开编辑页的竞态）。此后不再随 flow 回灌——早期实现按每次发射重建本地态，
+    // 快速连续拖拽时最后一次操作会被上一轮回写覆盖
+    var order by remember { mutableStateOf(state.cardOrder) }
+    var enabled by remember { mutableStateOf(state.cardEnabled) }
+    LaunchedEffect(state.cardConfigLoaded) {
+        if (state.cardConfigLoaded) {
+            order = state.cardOrder
+            enabled = state.cardEnabled
+        }
+    }
 
     LaunchedEffect(Unit) {
         snapshotFlow { order to enabled }
