@@ -175,6 +175,7 @@ private fun BandwidthTab(state: StatisticsUiState, onSelect: (String) -> Unit) {
                             lineLabels = listOf(inbound, outbound),
                             timestamps = state.bwTimestamps,
                             colors = remember { listOf(cRx, cTx) },
+                            areaColors = remember { listOf(ChartColors.rxArea, ChartColors.txArea) },
                             yFormatter = { Format.rate(it.roundToLong()) },
                         )
                     }
@@ -319,6 +320,9 @@ private fun LegendRow(entries: List<Pair<Color, String>>) {
     }
 }
 
+/** 线下面积填充缺省透明度（对齐 ChartColors 面积色的 ~18% 纯色语义） */
+private const val DEFAULT_AREA_ALPHA = 0.18f
+
 /** 通用多线折线：层配置 remember、数据走 modelProducer、chartTs 与事务同帧对齐（首页崩溃教训）、
  *  轴标签禁空串；点击查值 marker（时间 + 每线标签与值，标签行数 = 线数+1，lineCount 必须显式） */
 @Composable
@@ -327,6 +331,7 @@ private fun MultiLineChart(
     lineLabels: List<String>,
     timestamps: List<Long>,
     colors: List<Color>,
+    areaColors: List<Color>? = null,
     yFormatter: (Double) -> String,
     modifier: Modifier = Modifier,
 ) {
@@ -340,11 +345,16 @@ private fun MultiLineChart(
         chartTs = timestamps
     }
     val currentTs by rememberUpdatedState(chartTs)
-    val lineProvider = remember(colors) {
+    // 线下面积填充对齐首页带宽图：显式 areaColors 优先，缺省从线色派生 ~18% 纯色半透明
+    // （ChartColors 注释：shader 渐变高频刷新下有渲染斑点，面积一律纯色）
+    val lineProvider = remember(colors, areaColors) {
         LineCartesianLayer.LineProvider.series(
-            colors.map { color ->
+            colors.mapIndexed { i, color ->
                 LineCartesianLayer.Line(
                     fill = LineCartesianLayer.LineFill.single(Fill(color)),
+                    areaFill = LineCartesianLayer.AreaFill.single(
+                        Fill(areaColors?.getOrNull(i) ?: color.copy(alpha = DEFAULT_AREA_ALPHA)),
+                    ),
                     interpolator = LineCartesianLayer.Interpolator.cubic(),
                 )
             },
