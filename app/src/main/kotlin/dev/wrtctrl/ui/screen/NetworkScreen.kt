@@ -1,6 +1,5 @@
 package dev.wrtctrl.ui.screen
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,10 +11,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Visibility
@@ -47,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.wrtctrl.R
 import dev.wrtctrl.ui.component.Badge
+import dev.wrtctrl.ui.component.GroupHeader
 import dev.wrtctrl.ui.component.PollingGate
 import dev.wrtctrl.ui.component.CopyableRow
 import dev.wrtctrl.ui.component.InfoRow
@@ -253,7 +251,7 @@ private fun DeviceTab(state: NetworkUiState) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             state.deviceGroups.forEach { group ->
-                item(key = "header_${group.type}") { GroupHeader(group) }
+                item(key = "header_${group.type}") { DeviceGroupHeader(group) }
                 items(group.devices.size, key = { i -> "${group.type}_${group.devices[i].name}" }) { i ->
                     DeviceCard(group, group.devices[i])
                 }
@@ -262,8 +260,9 @@ private fun DeviceTab(state: NetworkUiState) {
     }
 }
 
+/** 设备分组标题：类型文案 + 设备数（视觉走共享 GroupHeader，节奏 top 4dp） */
 @Composable
-private fun GroupHeader(group: DeviceGroup) {
+private fun DeviceGroupHeader(group: DeviceGroup) {
     val label = stringResource(
         when (group.type) {
             "bridge" -> R.string.network_device_type_bridge
@@ -274,16 +273,7 @@ private fun GroupHeader(group: DeviceGroup) {
             else -> R.string.network_other
         },
     )
-    Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier
-                .width(4.dp)
-                .height(18.dp)
-                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp)),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text("${label} (${group.devices.size})", style = MaterialTheme.typography.titleSmall)
-    }
+    GroupHeader("${label} (${group.devices.size})", Modifier.padding(top = 4.dp))
 }
 
 @Composable

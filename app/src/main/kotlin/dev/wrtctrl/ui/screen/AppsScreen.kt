@@ -1,19 +1,16 @@
 package dev.wrtctrl.ui.screen
 
 import android.widget.Toast
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -59,6 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.wrtctrl.R
+import dev.wrtctrl.ui.component.GroupHeader
 import dev.wrtctrl.viewmodel.AppGroupId
 import dev.wrtctrl.viewmodel.AppItem
 import dev.wrtctrl.viewmodel.AppRegistry
@@ -116,7 +114,10 @@ fun AppsScreen(
                     ) {
                         groups.forEach { (group, apps) ->
                             item(key = "header_${group.name}", span = { GridItemSpan(maxLineSpan) }) {
-                                GroupHeader(group)
+                                GroupHeader(
+                                    stringResource(group.titleRes),
+                                    Modifier.padding(top = 12.dp, bottom = 4.dp),
+                                )
                             }
                             items(
                                 count = apps.size,
@@ -138,21 +139,6 @@ fun AppsScreen(
                 }
             }
         }
-    }
-}
-
-/** 分组标题：品牌色竖条 + 标题（与网络页 GroupHeader 同款视觉） */
-@Composable
-private fun GroupHeader(group: AppGroupId) {
-    Row(Modifier.padding(top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier
-                .width(4.dp)
-                .height(18.dp)
-                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp)),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(stringResource(group.titleRes), style = MaterialTheme.typography.titleSmall)
     }
 }
 
