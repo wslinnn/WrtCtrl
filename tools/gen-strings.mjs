@@ -35,6 +35,11 @@ if (!localeDir || !resDir) {
 // 语义修正（文案冻结，覆盖在转换层做）：
 // 既有文案含过期指引（新核心默认接受自签证书，指引已不成立）
 const OVERRIDES = {
+  // 应用页工具名（网络诊断/NAT 会话/重启路由器）与分组名（维护工具）
+  apps_diag: { zh: '网络诊断', en: 'Network diagnostics' },
+  apps_conntrack: { zh: 'NAT 会话', en: 'NAT sessions' },
+  apps_reboot: { zh: '重启路由器', en: 'Reboot router' },
+  apps_group_tools: { zh: '维护工具', en: 'Maintenance tools' },
   device_list_error_certificate: {
     zh: 'SSL 证书验证失败，请检查设备的 HTTPS 配置',
     en: 'SSL certificate verification failed. Check the device HTTPS configuration',
@@ -52,6 +57,16 @@ const OVERRIDES = {
   home_connections: {
     zh: 'NAT 会话',
     en: 'NAT sessions',
+  },
+  // 资源卡定名「资源」（系统信息卡，环组即资源全貌）
+  home_resource_monitor: {
+    zh: '资源',
+    en: 'Resources',
+  },
+  // 802.11 关联定名（无线客户端，弃「终端」）
+  client_wireless_clients: {
+    zh: '无线客户端',
+    en: 'Wireless clients',
   },
 };
 

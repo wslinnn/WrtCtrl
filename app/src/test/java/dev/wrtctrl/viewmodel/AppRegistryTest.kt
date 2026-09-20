@@ -14,7 +14,26 @@ class AppRegistryTest {
     fun `tools always visible regardless of probe result`() {
         val groups = AppRegistry.visibleGroups(emptyMap())
         val tools = groups.first { it.first == AppGroupId.TOOLS }.second
-        assertEquals(listOf("route", "process", "startup", "diag", "syslog", "conntrack", "reboot"), ids(tools))
+        assertEquals(listOf("diag", "conntrack", "syslog", "process", "route", "startup", "reboot"), ids(tools))
+    }
+
+    @Test
+    fun `visibleSections——插件段在前工具段收后、探测过滤、既有行序`() {
+        // 全部安装：插件段（network→storage→system 组内原序）在前，工具段收后
+        val installed = AppRegistry.probeConfigs.associateWith { true }
+        val (plugins, tools) = AppRegistry.visibleSections(installed)
+        assertEquals(
+            listOf("arpbind", "firewall", "upnp", "wolultra", "samba4", "cifs", "usb-printer", "autoreboot"),
+            ids(plugins),
+        )
+        assertEquals(
+            listOf("diag", "conntrack", "syslog", "process", "route", "startup", "reboot"),
+            ids(tools),
+        )
+        // 探测失败：upnp 从插件段消失，其余不动
+        val (pluginsPartial, toolsPartial) = AppRegistry.visibleSections(mapOf("upnpd" to false))
+        assertFalse(ids(pluginsPartial).contains("upnp"))
+        assertEquals(tools, toolsPartial)
     }
 
     @Test
@@ -44,9 +63,20 @@ class AppRegistryTest {
 
     @Test
     fun `empty group omitted and group order stable`() {
-        // 全部探测失败：只剩 tools + firewall(fixed network)；storage/system 组消失
+        // 全部探测失败：只剩 firewall(fixed network) + tools；storage/system 组消失
         val groups = AppRegistry.visibleGroups(emptyMap())
-        assertEquals(listOf(AppGroupId.TOOLS, AppGroupId.NETWORK), groups.map { it.first })
+        assertEquals(listOf(AppGroupId.NETWORK, AppGroupId.TOOLS), groups.map { it.first })
+    }
+
+    @Test
+    fun `plugin groups before tools (并3 插件前置)`() {
+        // 全部安装：插件组（network→storage→system）在前，维护工具组收后
+        val installed = AppRegistry.probeConfigs.associateWith { true }
+        val order = AppRegistry.visibleGroups(installed).map { it.first }
+        assertEquals(
+            listOf(AppGroupId.NETWORK, AppGroupId.STORAGE, AppGroupId.SYSTEM, AppGroupId.TOOLS),
+            order,
+        )
     }
 
     @Test

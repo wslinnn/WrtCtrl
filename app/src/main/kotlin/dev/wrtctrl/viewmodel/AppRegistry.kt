@@ -30,28 +30,34 @@ data class AppItem(
     val icon: String,
     /** 无合适图标的用缩写文字（UPnP/WOL，对齐旧 abbr） */
     val abbr: String? = null,
+    /** 能力副标题（并3：插件瓦片/工具行的能力一句话；null 不显） */
+    @StringRes val descRes: Int? = null,
 )
 
 object AppRegistry {
+    /** 维护工具 */
     val tools = listOf(
-        AppItem("route", AppGroupId.TOOLS, null, R.string.apps_route, "Route"),
-        AppItem("process", AppGroupId.TOOLS, null, R.string.apps_process, "Memory"),
-        AppItem("startup", AppGroupId.TOOLS, null, R.string.apps_startup, "Power"),
-        AppItem("diag", AppGroupId.TOOLS, null, R.string.apps_diag, "MonitorHeart"),
-        AppItem("syslog", AppGroupId.TOOLS, null, R.string.apps_syslog, "Description"),
-        AppItem("conntrack", AppGroupId.TOOLS, null, R.string.apps_conntrack, "Link"),
+        AppItem("diag", AppGroupId.TOOLS, null, R.string.apps_diag, "MonitorHeart", descRes = R.string.desc_diag),
+        AppItem("conntrack", AppGroupId.TOOLS, null, R.string.apps_conntrack, "Link", descRes = R.string.desc_conntrack),
+        AppItem("syslog", AppGroupId.TOOLS, null, R.string.apps_syslog, "Description", descRes = R.string.desc_syslog),
+        AppItem("process", AppGroupId.TOOLS, null, R.string.apps_process, "Memory", descRes = R.string.desc_process),
+        AppItem("route", AppGroupId.TOOLS, null, R.string.apps_route, "Route", descRes = R.string.desc_route),
+        AppItem("startup", AppGroupId.TOOLS, null, R.string.apps_startup, "Power", descRes = R.string.desc_startup),
         AppItem("reboot", AppGroupId.TOOLS, null, R.string.apps_reboot, "RestartAlt"),
     )
 
     val plugins = listOf(
-        AppItem("arpbind", AppGroupId.NETWORK, "arpbind", R.string.arpbind_title, "PushPin"),
-        AppItem("firewall", AppGroupId.NETWORK, null, R.string.firewall_title, "Shield"),
-        AppItem("upnp", AppGroupId.NETWORK, "upnpd", R.string.upnp_title, "Router"),
-        AppItem("wolultra", AppGroupId.NETWORK, "wolultra", R.string.wolultra_title, "WifiTethering", abbr = "WOL"),
-        AppItem("samba4", AppGroupId.STORAGE, "samba4", R.string.samba_title, "Share"),
-        AppItem("cifs", AppGroupId.STORAGE, "cifs-mount", R.string.cifs_title, "Save"),
-        AppItem("usb-printer", AppGroupId.STORAGE, "usb_printer", R.string.usb_printer_title, "Print"),
-        AppItem("autoreboot", AppGroupId.SYSTEM, "autoreboot", R.string.autoreboot_title, "Schedule"),
+        AppItem("arpbind", AppGroupId.NETWORK, "arpbind", R.string.arpbind_title, "PushPin", descRes = R.string.desc_arpbind),
+        AppItem("firewall", AppGroupId.NETWORK, null, R.string.firewall_title, "Shield", descRes = R.string.desc_firewall),
+        AppItem("upnp", AppGroupId.NETWORK, "upnpd", R.string.upnp_title, "Router", descRes = R.string.desc_upnp),
+        AppItem(
+            "wolultra", AppGroupId.NETWORK, "wolultra", R.string.wolultra_title,
+            "WifiTethering", abbr = "WOL", descRes = R.string.desc_wolultra,
+        ),
+        AppItem("samba4", AppGroupId.STORAGE, "samba4", R.string.samba_title, "Share", descRes = R.string.desc_samba),
+        AppItem("cifs", AppGroupId.STORAGE, "cifs-mount", R.string.cifs_title, "Save", descRes = R.string.desc_cifs),
+        AppItem("usb-printer", AppGroupId.STORAGE, "usb_printer", R.string.usb_printer_title, "Print", descRes = R.string.desc_usb_printer),
+        AppItem("autoreboot", AppGroupId.SYSTEM, "autoreboot", R.string.autoreboot_title, "Schedule", descRes = R.string.desc_autoreboot),
     )
 
     /** 全部需要探测的 config 名（并行 uci get 的清单，去重保序） */
@@ -59,14 +65,26 @@ object AppRegistry {
         (tools + plugins).mapNotNull { it.probeConfig }.distinct()
 
     /**
-     * 可见项分组（纯函数，单测覆盖）：tools 恒显；插件 fixed（probeConfig=null）恒显，
-     * 否则 installed[config]==true 才显；空组不出现。组序按 AppGroupId 声明序。
+     * 可见项分组（纯函数，单测覆盖）：插件 fixed（probeConfig=null）恒显，否则
+     * installed[config]==true 才显；tools 恒显；空组不出现。
+     * 组序 = 并3（UI 改版 P3）：插件组前置主视觉，维护工具组降权收后。
      */
     fun visibleGroups(installed: Map<String, Boolean>): List<Pair<AppGroupId, List<AppItem>>> =
-        AppGroupId.entries.mapNotNull { group ->
+        listOf(AppGroupId.NETWORK, AppGroupId.STORAGE, AppGroupId.SYSTEM, AppGroupId.TOOLS).mapNotNull { group ->
             val apps = (tools + plugins)
                 .filter { it.group == group }
                 .filter { it.probeConfig == null || installed[it.probeConfig] == true }
             if (apps.isEmpty()) null else group to apps
         }
+
+    /**
+     * 页面两段结构：第一段 = 全部 luci 插件（跳外部网页，组内原序 NETWORK→
+     * STORAGE→SYSTEM），第二段 = 全部原生工具（app 内屏）——四分组降为 AppGroupId 内部
+     * 归类依据，不再各自出 sechead。可见性规则与 visibleGroups 一致。
+     */
+    fun visibleSections(installed: Map<String, Boolean>): Pair<List<AppItem>, List<AppItem>> =
+        visible(installed, plugins) to visible(installed, tools)
+
+    private fun visible(installed: Map<String, Boolean>, items: List<AppItem>) =
+        items.filter { it.probeConfig == null || installed[it.probeConfig] == true }
 }

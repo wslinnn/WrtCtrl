@@ -3,20 +3,26 @@ package dev.wrtctrl.ui.app
 import android.app.Application
 import android.widget.Toast
 import androidx.annotation.StringRes
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Lan
@@ -25,9 +31,11 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -43,11 +51,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -56,6 +66,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.appcompat.app.AppCompatDelegate
 import dev.wrtctrl.R
+import dev.wrtctrl.data.Device
 import dev.wrtctrl.data.ThemeMode
 import dev.wrtctrl.data.ThemePrefs
 import dev.wrtctrl.ui.screen.AppsScreen
@@ -68,6 +79,8 @@ import dev.wrtctrl.ui.screen.LanguageScreen
 import dev.wrtctrl.ui.screen.NetworkScreen
 import dev.wrtctrl.ui.screen.StatisticsScreen
 import dev.wrtctrl.ui.screen.ThemeAction
+import dev.wrtctrl.ui.component.BadgeTone
+import dev.wrtctrl.ui.component.StatusBadge
 import dev.wrtctrl.viewmodel.AppViewModel
 import dev.wrtctrl.viewmodel.AppsViewModel
 import dev.wrtctrl.viewmodel.ClientViewModel
@@ -184,6 +197,12 @@ fun AppRoot() {
 private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
     var selected by remember { mutableIntStateOf(0) }
     var showDashboardEdit by remember { mutableStateOf(false) }
+    // 首页网络卡直达工具（NAT 会话→conntrack、DOWN 接口→诊断）：切到应用 Tab 并带开工具页
+    var pendingTool by remember { mutableStateOf<String?>(null) }
+    // 设备切换底部弹层（▾ / 顶栏设备图标共用）：连接成功（current 变更）自动收起
+    var showDeviceSheet by remember { mutableStateOf(false) }
+    var sheetTargetId by remember { mutableStateOf<String?>(null) }
+    val gate by vm.gate.collectAsStateWithLifecycle()
     val app = LocalContext.current.applicationContext as Application
     val homeVm: HomeViewModel = viewModel(
         factory = viewModelFactory { initializer { HomeViewModel(app) } }
@@ -204,6 +223,32 @@ private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
     val currentDevice by vm.current.collectAsStateWithLifecycle()
     // 首页切设备：重置过渡态 + 立即拉取（不带上份设备数据等下个轮询节拍）
     LaunchedEffect(currentDevice?.id) { homeVm.switchDevice(currentDevice?.id) }
+    // 弹层点选的设备连上后自动收起（点当前设备 = 立即收起，不重连）
+    LaunchedEffect(currentDevice?.id, sheetTargetId) {
+        if (sheetTargetId != null && sheetTargetId == currentDevice?.id) {
+            showDeviceSheet = false
+            sheetTargetId = null
+        }
+    }
+    if (showDeviceSheet) {
+        ModalBottomSheet(onDismissRequest = { showDeviceSheet = false }) {
+            DeviceSheetContent(
+                devices = gate.devices,
+                pings = gate.pings,
+                currentId = currentDevice?.id,
+                connecting = gate.connecting,
+                bannerError = gate.bannerError,
+                onClick = { device ->
+                    sheetTargetId = device.id
+                    vm.connectTo(device)
+                },
+                onManage = {
+                    showDeviceSheet = false
+                    vm.openDeviceList(fromMain = true)
+                },
+            )
+        }
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -215,8 +260,8 @@ private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
                             Icon(Icons.Filled.Tune, contentDescription = stringResource(R.string.dashboard_edit_title))
                         }
                     }
-                    // 设备切换入口（与门控页列表共用数据层，规格 B9）
-                    IconButton(onClick = { vm.openDeviceList(fromMain = true) }) {
+                    // 设备切换入口（底部弹层；管理走弹层内「管理设备」回门控列表）
+                    IconButton(onClick = { showDeviceSheet = true; vm.openDeviceSheet() }) {
                         Icon(Icons.Filled.Devices, contentDescription = stringResource(R.string.device_list_history_title))
                     }
                     ThemeAction()
@@ -244,14 +289,121 @@ private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
                     if (showDashboardEdit) {
                         DashboardEditScreen(homeVm, onBack = { showDashboardEdit = false })
                     } else {
-                        HomeScreen(homeVm, Modifier.fillMaxSize())
+                        HomeScreen(
+                            homeVm,
+                            onGotoTab = { selected = it },
+                            onOpenTool = {
+                                pendingTool = it
+                                selected = 4
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        )
                     }
                 }
                 1 -> StatisticsScreen(statisticsVm, currentDevice?.id, Modifier.fillMaxSize())
                 2 -> ClientScreen(clientVm, currentDevice?.id, Modifier.fillMaxSize())
                 3 -> NetworkScreen(networkVm, currentDevice?.id, Modifier.fillMaxSize())
-                else -> AppsScreen(appsVm, currentDevice?.id, onSessionLost = { vm.openDeviceList() }, Modifier.fillMaxSize())
+                else -> AppsScreen(
+                    appsVm,
+                    currentDevice?.id,
+                    pendingToolId = pendingTool,
+                    onToolConsumed = { pendingTool = null },
+                    onSessionLost = { vm.openDeviceList() },
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
+        }
+    }
+}
+
+/** 设备切换弹层内容：设备行（名称 + ping 徽章 + 地址，当前设备 ✓）+ 管理设备入口 */
+@Composable
+private fun DeviceSheetContent(
+    devices: List<Device>,
+    pings: Map<String, Long?>,
+    currentId: String?,
+    connecting: Boolean,
+    bannerError: String?,
+    onClick: (Device) -> Unit,
+    onManage: () -> Unit,
+) {
+    Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
+        Text(
+            stringResource(R.string.device_sheet_title),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 12.dp),
+        )
+        devices.forEach { device ->
+            val ping = pings[device.id]
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(enabled = !connecting) { onClick(device) }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(device.displayName, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.width(8.dp))
+                        when {
+                            ping != null -> StatusBadge(
+                                stringResource(R.string.home_ping_online, ping),
+                                BadgeTone.OK,
+                            )
+                            pings.containsKey(device.id) -> StatusBadge(
+                                stringResource(R.string.home_ping_offline),
+                                BadgeTone.ERR,
+                            )
+                            // 探活未落定：不占位（数据有源）
+                        }
+                    }
+                    Text(
+                        device.displayAddress,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (device.id == currentId) {
+                    Text(
+                        "✓",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+        bannerError?.let {
+            Text(
+                it,
+                Modifier.padding(top = 8.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        HorizontalDivider(Modifier.padding(vertical = 8.dp))
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(onClick = onManage)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.Edit,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                stringResource(R.string.device_sheet_manage),
+                Modifier.padding(start = 12.dp),
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
     }
 }
