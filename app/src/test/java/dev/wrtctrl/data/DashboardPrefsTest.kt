@@ -15,7 +15,8 @@ class DashboardPrefsTest {
     }
 
     @Test
-    fun `已存顺序保留且缺失 id 按默认序补尾`() {
+    fun `老配置里已除名id丢弃且缺失id按默认序补尾`() {
+        // 升级场景：旧五卡持久化（含 SYSTEM/STORAGE）→ 三卡保留用户自定顺序
         val config = DashboardPrefs.parse(
             orderRaw = "NETWORK,SYSTEM,RESOURCE",
             enabledRaw = "RESOURCE,NETWORK,SYSTEM,BANDWIDTH,STORAGE",
@@ -24,43 +25,36 @@ class DashboardPrefsTest {
         assertEquals(
             listOf(
                 DashboardCardId.NETWORK,
-                DashboardCardId.SYSTEM,
                 DashboardCardId.RESOURCE,
                 DashboardCardId.BANDWIDTH,
-                DashboardCardId.STORAGE,
             ),
             config.order,
         )
-        assertEquals(DashboardCardId.SYSTEM, config.collapsed.single())
+        assertTrue(config.collapsed.isEmpty())
     }
 
     @Test
     fun `非法 id 丢弃且重复去重`() {
-        val config = DashboardPrefs.parse("BOGUS,SYSTEM,SYSTEM", "BOGUS", null)
+        val config = DashboardPrefs.parse("BOGUS,NETWORK,NETWORK", "BOGUS", null)
         assertEquals(
             listOf(
-                DashboardCardId.SYSTEM,
-                DashboardCardId.RESOURCE,
-                DashboardCardId.BANDWIDTH,
                 DashboardCardId.NETWORK,
-                DashboardCardId.STORAGE,
+                DashboardCardId.BANDWIDTH,
+                DashboardCardId.RESOURCE,
             ),
             config.order,
         )
     }
 
     @Test
-    fun `collapsed 键缺省回落默认收起集而非空`() {
-        // 老版本升级场景：order/enabled 已存、collapsed 尚无 → 明细三卡默认收起
+    fun `collapsed 键缺省回落默认空集而非旧收起集`() {
+        // 老版本升级场景：order/enabled 已存、collapsed 尚无 → 新默认全展开
         val config = DashboardPrefs.parse(
             orderRaw = DashboardCardId.entries.joinToString(",") { it.name },
             enabledRaw = DashboardCardId.entries.joinToString(",") { it.name },
             collapsedRaw = null,
         )
-        assertEquals(
-            setOf(DashboardCardId.SYSTEM, DashboardCardId.NETWORK, DashboardCardId.STORAGE),
-            config.collapsed,
-        )
+        assertEquals(emptySet<DashboardCardId>(), config.collapsed)
     }
 
     @Test
@@ -68,5 +62,16 @@ class DashboardPrefsTest {
         val config = DashboardPrefs.parse(null, null, collapsedRaw = "BOGUS,RESOURCE")
         assertTrue(DashboardCardId.RESOURCE in config.collapsed)
         assertEquals(1, config.collapsed.size)
+    }
+
+    @Test
+    fun `enabled 解析为空视同未配置全开`() {
+        // 旧 enabled 恰好只含已除名 id（SYSTEM/STORAGE）→ 不允许首页被清空
+        val config = DashboardPrefs.parse(
+            orderRaw = "BANDWIDTH,RESOURCE,NETWORK",
+            enabledRaw = "SYSTEM,STORAGE",
+            collapsedRaw = null,
+        )
+        assertEquals(DashboardCardId.entries.toSet(), config.enabled)
     }
 }

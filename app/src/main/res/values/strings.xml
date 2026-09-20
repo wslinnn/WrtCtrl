@@ -26,4 +26,71 @@
     <string name="network_empty">无数据</string>
     <!-- 拉取失败态（复用生成键 common_load_failed） -->
     <string name="client_search_clear">清除搜索</string>
+    <!-- UI 改版 P1：首页 v2（吞吐术语见规约 11；%1$s 等占位与生成器同风格） -->
+    <string name="home_realtime_throughput">实时吞吐</string>
+    <string name="home_downlink">↓ 下行</string>
+    <string name="home_uplink">↑ 上行</string>
+    <string name="home_peak">峰值</string>
+    <string name="home_disk">磁盘</string>
+    <string name="home_uptime_prefix">已运行 %1$s</string>
+    <!-- 折叠摘要独立键：英文用 RAM 缩写压宽（Memory 全拼在窄屏/大字体下必截断） -->
+    <string name="home_resource_summary">CPU %1$s · 内存 %2$s · 磁盘 %3$s</string>
+    <string name="home_ping_online">在线 %1$d ms</string>
+    <string name="home_ping_offline">离线</string>
+    <string name="home_clients_summary">无线 %1$s · 租约 %2$s</string>
+    <!-- 入口词四定词（P2/P3 复用） -->
+    <string name="entry_trend">趋势 →</string>
+    <string name="entry_details">详情 →</string>
+    <string name="entry_diag">诊断 →</string>
+    <!-- UI 改版 P2：统计页（吞吐术语见规约 11） -->
+    <string name="statistics_throughput">吞吐</string>
+    <string name="statistics_window_transfer">本窗口传输</string>
+    <!-- UI 改版 P2：客户端页（行减法；术语见规约 11） -->
+    <string name="client_dhcp_leases">DHCP 租约</string>
+    <string name="client_static">静态</string>
+    <string name="client_lease_remaining">剩余 %1$s</string>
+    <string name="client_band">频段</string>
+    <string name="client_no_leases">暂无租约</string>
+    <string name="client_leases_loading">正在加载租约…</string>
+    <string name="client_no_hostname">未知主机</string>
+    <!-- UI 改版 P2：网络页（三层结构 + 承载句式见规约 11） -->
+    <string name="network_sys_devices">系统设备</string>
+    <string name="network_not_connected">未连接</string>
+    <string name="network_ipv6_only">仅 IPv6</string>
+    <string name="network_no_address">无地址</string>
+    <string name="network_boot_total">开机累计</string>
+    <string name="network_carrying">承载 %1$s</string>
+    <string name="network_assoc_online">%1$d 台在线</string>
+    <!-- 信号档位五级（规约 11，封闭词表） -->
+    <string name="signal_excellent">极好</string>
+    <string name="signal_good">良好</string>
+    <string name="signal_fair">一般</string>
+    <string name="signal_weak">较弱</string>
+    <string name="signal_poor">差</string>
+    <!-- 能力副标题 + 设备切换弹层 -->
+    <string name="device_sheet_title">选择路由器</string>
+    <string name="device_sheet_manage">管理设备</string>
+    <string name="desc_route">IPv4 · IPv6</string>
+    <string name="desc_process">CPU · 内存</string>
+    <string name="desc_startup">系统服务</string>
+    <string name="desc_diag">ping · 路由追踪 · DNS</string>
+    <string name="desc_syslog">syslog · dmesg</string>
+    <string name="desc_conntrack">NAT 会话表</string>
+    <string name="desc_arpbind">静态 ARP 绑定</string>
+    <string name="desc_firewall">规则 · 区域 · 转发</string>
+    <string name="desc_upnp">自动端口映射</string>
+    <string name="desc_wolultra">魔术包唤醒</string>
+    <string name="desc_samba">Samba</string>
+    <string name="desc_cifs">网络共享挂载</string>
+    <string name="desc_usb_printer">USB 打印机服务</string>
+    <string name="desc_autoreboot">按计划自动重启</string>
+    <!-- 应用页分组名 -->
+    <string name="apps_group_plugins">插件</string>
+    <!-- WiFi 密码显隐/复制 + 二维码 -->
+    <string name="wifi_not_shareable">该网络不适用扫码共享</string>
+    <string name="wifi_open_network">未设密码</string>
+    <string name="wifi_qr_zoom">放大</string>
+    <string name="wifi_secret_failed">密码拉取失败</string>
+    <string name="wifi_secret_retry">重试</string>
+    <string name="wifi_ssid_label">SSID</string>
 </resources>

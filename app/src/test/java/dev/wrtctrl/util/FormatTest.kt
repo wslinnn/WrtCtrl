@@ -30,6 +30,30 @@ class FormatTest {
     }
 
     @Test
+    fun `bytesCompact 整数口径`() {
+        assertEquals("512 B", Format.bytesCompact(512))
+        assertEquals("2 KB", Format.bytesCompact(2048))
+        assertEquals("819 MB", Format.bytesCompact(858993460))
+        assertEquals("2 GB", Format.bytesCompact(2147483648L))
+    }
+
+    @Test
+    fun `rateParts 数值单位分离且换档与 rate 一致`() {
+        assertEquals("0" to "B/s", Format.rateParts(0).let { it.value to it.unit })
+        assertEquals("512" to "B/s", Format.rateParts(512).let { it.value to it.unit })
+        assertEquals("2" to "KB/s", Format.rateParts(2048).let { it.value to it.unit })
+        assertEquals("1.5" to "MB/s", Format.rateParts((1.5 * 1024 * 1024).toLong()).let { it.value to it.unit })
+    }
+
+    @Test
+    fun `durationBrief 无秒级`() {
+        assertEquals("0m", Format.durationBrief(0))
+        assertEquals("59m", Format.durationBrief(59 * 60 + 30))
+        assertEquals("1h 1m", Format.durationBrief(3661))
+        assertEquals("1d 1h", Format.durationBrief(90061))
+    }
+
+    @Test
     fun `duration 分级拼接`() {
         assertEquals("0s", Format.duration(0))
         assertEquals("59s", Format.duration(59))

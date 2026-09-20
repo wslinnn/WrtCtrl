@@ -35,6 +35,41 @@ object Format {
         return if (i == 1) "${n.roundToInt()} ${units[i]}" else String.format(NUM, "%.1f %s", n, units[i])
     }
 
+    /** 速率数值/单位分离（换档语义与 rate() 完全一致）：KPI 大字小单位排版用，
+     *  并列数值各带各的单位 */
+    data class RateParts(val value: String, val unit: String)
+
+    fun rateParts(value: Long): RateParts {
+        if (value <= 0) return RateParts("0", "B/s")
+        val units = listOf("B/s", "KB/s", "MB/s", "GB/s")
+        var i = floor(ln(value.toDouble()) / ln(1024.0)).toInt()
+        if (i >= units.size) i = units.size - 1
+        if (i <= 0) return RateParts(value.toString(), "B/s")
+        val n = value / 1024.0.pow(i)
+        return if (i == 1) RateParts(n.roundToInt().toString(), units[i])
+        else RateParts(String.format(NUM, "%.1f", n), units[i])
+    }
+
+    /** 无秒级简版时长（首页 hero「已运行 23h 30m」；秒级跳动太吵，秒级版见 duration） */
+    fun durationBrief(seconds: Long): String {
+        val d = seconds / 86400
+        val h = (seconds % 86400) / 3600
+        val m = (seconds % 3600) / 60
+        return when {
+            d > 0 -> "${d}d ${h}h"
+            h > 0 -> "${h}h ${m}m"
+            else -> "${m}m"
+        }
+    }
+
+    /** 紧凑口径（整数，环下比值/收起态摘要等窄场景）：B/KB/MB/GB 四舍五入取整，各带单位 */
+    fun bytesCompact(b: Long): String = when {
+        b < 1024 -> "$b B"
+        b < 1024 * 1024 -> "${(b / 1024.0).roundToInt()} KB"
+        b < 1024L * 1024 * 1024 -> "${(b / 1024.0 / 1024).roundToInt()} MB"
+        else -> "${(b / 1024.0 / 1024 / 1024).roundToInt()} GB"
+    }
+
     fun duration(seconds: Long): String {
         val d = seconds / 86400
         val h = (seconds % 86400) / 3600

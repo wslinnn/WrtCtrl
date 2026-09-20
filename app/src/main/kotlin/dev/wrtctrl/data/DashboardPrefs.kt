@@ -7,7 +7,11 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
-enum class DashboardCardId { RESOURCE, BANDWIDTH, SYSTEM, NETWORK, STORAGE }
+/**
+ * 可折叠卡三件（UI 改版 P1 收敛：SYSTEM 解体为身份区+资源环、STORAGE 除名——
+ * 旧持久化里的已除名 id 经 parse 容错丢弃）。枚举顺序即默认卡片顺序。
+ */
+enum class DashboardCardId { BANDWIDTH, RESOURCE, NETWORK }
 
 data class DashboardConfig(
     val order: List<DashboardCardId>,
@@ -19,7 +23,7 @@ data class DashboardConfig(
 // 独立 DataStore 文件：与 wrtctrl（设备仓储）互不触碰，避免同文件单例冲突
 private val Context.dashboardStore by preferencesDataStore(name = "dashboard")
 
-/** 仪表盘卡片配置持久化：order 为全序（5 卡恒在列表），enabled 决定渲染时是否出现，collapsed 决定展开态 */
+/** 仪表盘卡片配置持久化：order 为全序（3 卡恒在列表），enabled 决定渲染时是否出现，collapsed 决定展开态 */
 class DashboardPrefs(private val context: Context) {
 
     fun configFlow(): Flow<DashboardConfig> = context.dashboardStore.data.map { prefs ->
@@ -42,11 +46,12 @@ class DashboardPrefs(private val context: Context) {
         val DEFAULT = DashboardConfig(
             order = DashboardCardId.entries.toList(),
             enabled = DashboardCardId.entries.toSet(),
-            collapsed = setOf(DashboardCardId.SYSTEM, DashboardCardId.NETWORK, DashboardCardId.STORAGE),
+            collapsed = emptySet(),
         )
 
-        /** 容错解析：非法 id 丢弃、缺失的 id 按默认序补尾（版本演进兼容），enabled 缺省全开，
-         *  collapsed 键缺省=默认收起集；升级后新出现的卡类型不在已存集合中 → 展开态 */
+        /** 容错解析：非法/已除名 id 丢弃、缺失的 id 按默认序补尾
+         *  （版本演进兼容），enabled 缺省全开；enabled 解析后为空视同未配置（全开），
+         *  防旧配置恰好只含已除名 id 时首页被清空；collapsed 键缺省=全展开 */
         fun parse(orderRaw: String?, enabledRaw: String?, collapsedRaw: String? = null): DashboardConfig {
             if (orderRaw.isNullOrBlank() && enabledRaw.isNullOrBlank() && collapsedRaw.isNullOrBlank()) return DEFAULT
             val order = (orderRaw?.split(",") ?: emptyList())
@@ -56,6 +61,7 @@ class DashboardPrefs(private val context: Context) {
             val enabled = (enabledRaw?.split(",") ?: emptyList())
                 .mapNotNull { runCatching { DashboardCardId.valueOf(it.trim()) }.getOrNull() }
                 .toSet()
+                .ifEmpty { DEFAULT.enabled }
             val collapsed = if (collapsedRaw.isNullOrBlank()) {
                 DEFAULT.collapsed
             } else {

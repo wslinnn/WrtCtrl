@@ -12,6 +12,9 @@ data class MountInfo(
     val detail: String,
 )
 
+/** 首页网络卡的接口状态 chip：name 接口名，up UP/DOWN */
+data class IfaceChip(val name: String, val up: Boolean)
+
 /**
  * 首页轮询响应的纯解析函数：JSONObject 进、标量/列表出，无 Android 依赖——
  * 独立成单元以便 JVM 单测覆盖（本地单测经 testImplementation 的真 org.json 运行，
@@ -30,23 +33,10 @@ internal object HomeParsers {
         return board.optString("model").ifBlank { distribution }
     }
 
-    /** 固件信息「发行版 版本(内核)」 */
-    fun versionString(board: JSONObject): String {
-        val release = board.optJSONObject("release")
-        val distribution = release?.optString("distribution", "OpenWrt")?.ifBlank { "OpenWrt" } ?: "OpenWrt"
-        val version = release?.optString("version") ?: ""
-        val kernel = board.optString("kernel")
-        val base = if (version.isNotBlank()) "$distribution $version($kernel)" else "$distribution ($kernel)"
-        return base.ifBlank { "--" }
-    }
-
-    /** 负载均值：system info 的 load[3] 为定点数（/65536） */
-    fun load(info: JSONObject): String? {
-        val arr = info.optJSONArray("load") ?: return null
-        if (arr.length() < 3) return null
-        return (0 until 3).joinToString(" ") {
-            String.format(java.util.Locale.US, "%.2f", arr.optDouble(it) / 65536.0)
-        }
+    /** 固件短版本号（release.version，如 23.05.5）；缺失 null 不显 chip */
+    fun releaseVersion(board: JSONObject): String? {
+        val v = board.optJSONObject("release")?.optString("version")?.trim()
+        return v?.takeIf { it.isNotEmpty() }
     }
 
     fun memoryPercent(info: JSONObject): Int {
@@ -61,7 +51,7 @@ internal object HomeParsers {
         val memory = info.optJSONObject("memory") ?: return "--"
         val total = memory.optLong("total")
         val used = total - memory.optLong("available")
-        return "${Format.bytes(used)} / ${Format.bytes(total)}"
+        return "${Format.bytesCompact(used)} / ${Format.bytesCompact(total)}"
     }
 
     /** CPU 使用率（%）。数据源 = luci getCPUUsage 的 cpuusage 字段——部分回退：
@@ -84,16 +74,24 @@ internal object HomeParsers {
         return v.roundToInt()
     }
 
-    /** 连接数「当前 / 上限」；计数文件缺失（内核未编 nf_conntrack）→ null */
-    fun connectionsText(count: String?, max: String?): String? {
+    /** NAT 会话计数数值对（count/max，进度条分母）；任一文件缺失/非数 → null */
+    fun connections(count: String?, max: String?): Pair<Int, Int>? {
         val current = count?.trim()?.toIntOrNull() ?: return null
-        val maxV = max?.trim()?.toIntOrNull() ?: 0
-        return "$current / $maxV"
+        val maxV = max?.trim()?.toIntOrNull() ?: return null
+        return current to maxV
+    }
+
+    /** 接口状态 chip（UP/DOWN）：interface 是数组（顺序稳定，不涉 HashMap 键序），剔除 loopback */
+    fun ifaceChips(dump: JSONObject): List<IfaceChip> {
+        val interfaces = dump.optJSONArray("interface") ?: return emptyList()
+        return (0 until interfaces.length()).mapNotNull { i ->
+            val entry = interfaces.optJSONObject(i) ?: return@mapNotNull null
+            val name = entry.optString("interface")
+            if (name.isBlank() || name == "loopback") null else IfaceChip(name, entry.optBoolean("up", false))
+        }
     }
 
     fun wanIp(dump: JSONObject): String? = ipOf(dump, "wan")
-
-    fun lanIp(dump: JSONObject): String? = ipOf(dump, "lan")
 
     /** 默认路由（target=0.0.0.0/0）的 nexthop */
     fun gateway(dump: JSONObject): String? {
@@ -139,7 +137,7 @@ internal object HomeParsers {
                 device = entry.optString("device", "--").ifBlank { "--" },
                 mount = entry.optString("mount", "--").ifBlank { "--" },
                 usagePercent = percent,
-                detail = "${Format.bytes(used)} / ${Format.bytes(total)}",
+                detail = "${Format.bytesCompact(used)} / ${Format.bytesCompact(total)}",
             )
         }
         return list
@@ -160,4 +158,23 @@ internal object HomeParsers {
         }
         return null
     }
+}
+
+/** 带宽序列断档截断（文件级纯函数，不占用 HomeParsers 的函数数）：设备端实时统计是
+ *  「调用时采样」——app 停轮询期间设备缓冲冻结在旧时刻，恢复轮询后新旧样本直接拼接出
+ *  假连续（X 轴 20:18:13 直跳 20:22:34 的根因）。相邻采样间隔超过 gapLimitSec 即视为
+ *  断档，截掉最后一次断档之前的全部样本：丢弃的是缺测区间而非近似，峰值随之只统计
+ *  当前连续窗口。 */
+internal fun contiguousBandwidthTail(
+    rx: List<Double>,
+    tx: List<Double>,
+    ts: List<Long>,
+    gapLimitSec: Long,
+): Triple<List<Double>, List<Double>, List<Long>> {
+    var cut = 0
+    for (i in 1 until ts.size) {
+        if (ts[i] - ts[i - 1] > gapLimitSec) cut = i
+    }
+    if (cut == 0) return Triple(rx, tx, ts)
+    return Triple(rx.drop(cut), tx.drop(cut), ts.drop(cut))
 }

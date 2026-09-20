@@ -178,6 +178,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** 设备切换底部弹层（Main 内轻量切换）：只刷设备表与并行探活，不动 phase；
+     *  连接失败经 gate.bannerError 在弹层内呈现（屏层收集 gate 态渲染） */
+    fun openDeviceSheet() {
+        viewModelScope.launch {
+            val devices = repo.list()
+            _gate.update { it.copy(devices = devices, pings = emptyMap(), bannerError = null) }
+            pingAll(devices)
+        }
+    }
+
     /** Gate 页手势返回：快速切换场景取消切换回主页 */
     fun returnToMain() {
         gateCameFromMain = false

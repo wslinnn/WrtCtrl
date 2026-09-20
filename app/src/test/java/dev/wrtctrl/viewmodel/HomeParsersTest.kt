@@ -52,18 +52,10 @@ class HomeParsersTest {
     // ── load / memory（system info） ──
 
     @Test
-    fun `load 定点数转三值均值`() {
-        val info = JSONObject("""{"load": [65536, 131072, 196608]}""")
-        assertEquals("1.00 2.00 3.00", HomeParsers.load(info))
-        assertNull(HomeParsers.load(JSONObject("""{"load": [65536]}""")))
-        assertNull(HomeParsers.load(JSONObject("{}")))
-    }
-
-    @Test
     fun `memoryPercent 与明细`() {
         val info = JSONObject("""{"memory": {"total": 2147483648, "available": 1288490188}}""")
         assertEquals(40, HomeParsers.memoryPercent(info))
-        assertEquals("819.20 MB / 2.00 GB", HomeParsers.memoryDetail(info))
+        assertEquals("819 MB / 2 GB", HomeParsers.memoryDetail(info))
         assertEquals(0, HomeParsers.memoryPercent(JSONObject("""{"memory": {"total": 0, "available": 0}}""")))
         assertEquals(0, HomeParsers.memoryPercent(JSONObject("{}")))
     }
@@ -83,9 +75,8 @@ class HomeParsersTest {
     )
 
     @Test
-    fun `wan lan 地址与掩码`() {
+    fun `wan 地址与掩码`() {
         assertEquals("1.2.3.4/24", HomeParsers.wanIp(dump))
-        assertEquals("192.168.1.1/24", HomeParsers.lanIp(dump))
     }
 
     @Test
@@ -116,12 +107,78 @@ class HomeParsersTest {
         val list = HomeParsers.mountList(mounts)
         assertEquals(listOf("/overlay", "/tmp", "/mnt/sda1"), list.map { it.mount })
         assertEquals(50, list[0].usagePercent)
-        assertEquals("128.00 MB / 256.00 MB", list[0].detail)
+        assertEquals("128 MB / 256 MB", list[0].detail)
     }
 
     @Test
-    fun `connectionsText 计数文件缺失返回 null`() {
-        assertEquals("123 / 456", HomeParsers.connectionsText("123\n", "456"))
-        assertNull(HomeParsers.connectionsText(null, "456"))
+    fun `connections 计数文件缺失或非法返回 null`() {
+        assertEquals(123 to 456, HomeParsers.connections("123\n", "456"))
+        assertNull(HomeParsers.connections(null, "456"))
+        assertNull(HomeParsers.connections("123", "abc"))
+    }
+
+    // ── 固件短版本号 / 接口 chip ──
+
+    @Test
+    fun `releaseVersion 取短版本号缺失返回 null`() {
+        val board = JSONObject("""{"release": {"version": " 23.05.5 "}}""")
+        assertEquals("23.05.5", HomeParsers.releaseVersion(board))
+        assertNull(HomeParsers.releaseVersion(JSONObject("""{"release": {}}""")))
+        assertNull(HomeParsers.releaseVersion(JSONObject("{}")))
+    }
+
+    @Test
+    fun `ifaceChips 保序剔除loopback并读up标志`() {
+        val chips = HomeParsers.ifaceChips(
+            JSONObject(
+                """
+                {"interface": [
+                    {"interface": "loopback", "up": true},
+                    {"interface": "wan", "up": true},
+                    {"interface": "wanb", "up": false}
+                ]}
+                """.trimIndent(),
+            ),
+        )
+        assertEquals(listOf("wan" to true, "wanb" to false), chips.map { it.name to it.up })
+        assertEquals(0, HomeParsers.ifaceChips(JSONObject("""{"interface": []}""")).size)
+    }
+
+    // ── contiguousBandwidthTail（停轮询恢复后假连续断档截断） ──
+
+    @Test
+    fun `带宽序列连续样本原样保留`() {
+        val ts = listOf(1_000L, 1_003L, 1_006L, 1_009L)
+        val (rx, tx, out) = contiguousBandwidthTail(
+            listOf(1.0, 2.0, 3.0, 4.0),
+            listOf(0.5, 0.6, 0.7, 0.8),
+            ts,
+            11,
+        )
+        assertEquals(listOf(1.0, 2.0, 3.0, 4.0), rx)
+        assertEquals(listOf(0.5, 0.6, 0.7, 0.8), tx)
+        assertEquals(ts, out)
+    }
+
+    @Test
+    fun `带宽序列截掉最后一次断档前的旧样本`() {
+        // 模拟停轮询恢复：1006s 后设备缓冲冻结约 35 分钟无人采样，再从 3126s 继续
+        val ts = listOf(1_000L, 1_003L, 1_006L, 3_126L, 3_129L)
+        val (rx, tx, out) = contiguousBandwidthTail(
+            listOf(9.0, 9.0, 9.0, 1.0, 2.0),
+            listOf(1.0, 1.0, 1.0, 0.5, 0.6),
+            ts,
+            11,
+        )
+        assertEquals(listOf(1.0, 2.0), rx)
+        assertEquals(listOf(0.5, 0.6), tx)
+        assertEquals(listOf(3_126L, 3_129L), out)
+    }
+
+    @Test
+    fun `带宽序列断档后只剩单点不越界`() {
+        val (rx, _, out) = contiguousBandwidthTail(listOf(1.0, 2.0), listOf(1.0, 1.0), listOf(1_000L, 2_000L), 11)
+        assertEquals(listOf(2.0), rx)
+        assertEquals(listOf(2_000L), out)
     }
 }

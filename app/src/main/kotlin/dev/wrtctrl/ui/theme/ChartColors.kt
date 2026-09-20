@@ -15,6 +15,13 @@ object ChartColors {
     val rxArea = Color(0x2E4FACFE)
     val txArea = Color(0x2800C4CC)
 
+    // ↓↑ 数值文本用深/亮变体（出入站文字色 token）：rx/tx 原色在浅色背景上对比度不足，
+    // 深色主题直接用亮线色；线与面积仍用原色
+    val rxTextLight = Color(0xFF1976D2)
+    val txTextLight = Color(0xFF00838F)
+    val rxTextDark = Color(0xFF5AB6FF)
+    val txTextDark = Color(0xFF2ED3DA)
+
     /** 语义警示渐变（环组）：CPU/内存/温度越限时的橙→深橙，替代品牌蓝青传达健康信号 */
     val warning = listOf(Color(0xFFFFB300), Color(0xFFF4511E))
 }

@@ -39,11 +39,9 @@ import dev.wrtctrl.data.DashboardCardId
 import dev.wrtctrl.viewmodel.HomeViewModel
 
 private fun cardTitleRes(id: DashboardCardId): Int = when (id) {
+    DashboardCardId.BANDWIDTH -> R.string.home_realtime_throughput
     DashboardCardId.RESOURCE -> R.string.home_resource_monitor
-    DashboardCardId.BANDWIDTH -> R.string.statistics_bandwidth
-    DashboardCardId.SYSTEM -> R.string.home_system_status
     DashboardCardId.NETWORK -> R.string.home_network_status
-    DashboardCardId.STORAGE -> R.string.home_disk_status
 }
 
 /** 编辑仪表盘：长按把手拖拽排序，Switch 控制显隐；变更即时持久化（DataStore）。

@@ -3,15 +3,13 @@ package dev.wrtctrl.ui.theme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
-import kotlin.math.roundToInt
+import com.materialkolor.PaletteStyle
+import com.materialkolor.dynamicColorScheme
 
 private val AppTypography = Typography(
     displayLarge = TextStyle(fontSize = 57.sp, fontWeight = FontWeight.Normal, lineHeight = 64.sp, letterSpacing = (-0.25).sp),
@@ -31,158 +29,50 @@ private val AppTypography = Typography(
     labelSmall = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium, lineHeight = 16.sp, letterSpacing = 0.5.sp),
 )
 
-private fun Color.hsl(): Triple<Float, Float, Float> {
-    val r = red
-    val g = green
-    val b = blue
-    val max = maxOf(r, g, b)
-    val min = minOf(r, g, b)
-    val l = (max + min) / 2f
-    val h: Float
-    val s: Float
-    if (max == min) {
-        h = 0f; s = 0f
-    } else {
-        val d = max - min
-        s = if (l > 0.5f) d / (2f - max - min) else d / (max + min)
-        h = when (max) {
-            r -> (g - b) / d + (if (g < b) 6f else 0f)
-            g -> (b - r) / d + 2f
-            else -> (r - g) / d + 4f
-        } / 6f
-    }
-    return Triple(h * 360f, s, l)
-}
-
-private fun hslToColor(h: Float, s: Float, l: Float): Color {
-    val c = (1f - kotlin.math.abs(2f * l - 1f)) * s
-    val x = c * (1f - kotlin.math.abs((h / 60f) % 2f - 1f))
-    val m = l - c / 2f
-    val (r, g, b) = when {
-        h < 60 -> Triple(c, x, 0f)
-        h < 120 -> Triple(x, c, 0f)
-        h < 180 -> Triple(0f, c, x)
-        h < 240 -> Triple(0f, x, c)
-        h < 300 -> Triple(x, 0f, c)
-        else -> Triple(c, 0f, x)
-    }
-    return Color(((r + m) * 255).roundToInt(), ((g + m) * 255).roundToInt(), ((b + m) * 255).roundToInt())
-}
-
 /**
- * 由种子色派生整套 Material 3 色板（深浅色各自完整 color role）。
- * seedColor 缺省用 WrtCtrl 品牌色。
+ * 主题入口：主色/容器/语义色由 materialkolor（Material Color Utilities 音阶体系）从种子色
+ * Vibrant 风格生成（简约 + 轻微科技感）；表面族用中性覆盖——彩底廉价，
+ * 渐变/科技感只上图表与主色。种子色缺省沿用既有品牌色 #0E84B5。
+ * 对比度回归门见 ThemePaletteTest。
  */
-fun generateColorScheme(seed: Color, isDark: Boolean): androidx.compose.material3.ColorScheme {
-    val (h, s, l) = seed.hsl()
-    val primary = seed
-    val onPrimary = if (l > 0.5f) Color.Black else Color.White
-    val primaryContainer = hslToColor(h, (s * 0.7f).coerceAtMost(1f), if (isDark) 0.3f else 0.85f)
-    val onPrimaryContainer = if (isDark) hslToColor(h, 0.6f, 0.9f) else hslToColor(h, 0.8f, 0.15f)
-
-    val secH = (h + 30f) % 360f
-    val secondary = hslToColor(secH, (s * 0.6f).coerceAtMost(1f), if (isDark) 0.7f else 0.45f)
-    val onSecondary = if (isDark) Color.Black else Color.White
-    val secondaryContainer = hslToColor(secH, (s * 0.5f).coerceAtMost(1f), if (isDark) 0.25f else 0.9f)
-    val onSecondaryContainer = if (isDark) hslToColor(secH, 0.5f, 0.85f) else hslToColor(secH, 0.7f, 0.15f)
-
-    val terH = (h + 60f) % 360f
-    val tertiary = hslToColor(terH, (s * 0.5f).coerceAtMost(1f), if (isDark) 0.7f else 0.5f)
-    val onTertiary = if (isDark) Color.Black else Color.White
-    val tertiaryContainer = hslToColor(terH, (s * 0.4f).coerceAtMost(1f), if (isDark) 0.25f else 0.9f)
-    val onTertiaryContainer = if (isDark) hslToColor(terH, 0.4f, 0.85f) else hslToColor(terH, 0.6f, 0.15f)
-
-    val surface = if (isDark) Color(0xFF1C1B1F) else Color(0xFFFFFBFE)
-    val onSurface = if (isDark) Color(0xFFE6E1E5) else Color(0xFF1C1B1F)
-    val surfaceVariant = if (isDark) Color(0xFF49454F) else Color(0xFFE7E0EC)
-    val onSurfaceVariant = if (isDark) Color(0xFFCAC4D0) else Color(0xFF49454F)
-
-    return if (isDark) {
-        darkColorScheme(
-            primary = hslToColor(h, (s * 0.8f).coerceAtMost(1f), 0.8f),
-            onPrimary = hslToColor(h, 0.6f, 0.2f),
-            primaryContainer = primaryContainer,
-            onPrimaryContainer = onPrimaryContainer,
-            secondary = secondary,
-            onSecondary = onSecondary,
-            secondaryContainer = secondaryContainer,
-            onSecondaryContainer = onSecondaryContainer,
-            tertiary = tertiary,
-            onTertiary = onTertiary,
-            tertiaryContainer = tertiaryContainer,
-            onTertiaryContainer = onTertiaryContainer,
-            error = Color(0xFFF2B8B5),
-            onError = Color(0xFF601410),
-            errorContainer = Color(0xFF8C1D18),
-            onErrorContainer = Color(0xFFF9DEDC),
-            background = surface,
-            onBackground = onSurface,
-            surface = surface,
-            onSurface = onSurface,
-            surfaceVariant = surfaceVariant,
-            onSurfaceVariant = onSurfaceVariant,
-            outline = Color(0xFF938F99),
-            outlineVariant = Color(0xFF49454F),
-            inverseSurface = Color(0xFFE6E1E5),
-            inverseOnSurface = Color(0xFF313033),
-            inversePrimary = hslToColor(h, (s * 0.8f).coerceAtMost(1f), 0.8f),
-            surfaceDim = Color(0xFF141218),
-            surfaceBright = Color(0xFF3B383E),
-            surfaceContainerLowest = Color(0xFF0F0D13),
-            surfaceContainerLow = Color(0xFF1D1B20),
-            surfaceContainer = Color(0xFF211F26),
-            surfaceContainerHigh = Color(0xFF2B2930),
-            surfaceContainerHighest = Color(0xFF36343B),
-        )
-    } else {
-        lightColorScheme(
-            primary = hslToColor(h, (s * 0.8f).coerceAtMost(1f), 0.4f),
-            onPrimary = Color.White,
-            primaryContainer = primaryContainer,
-            onPrimaryContainer = onPrimaryContainer,
-            secondary = secondary,
-            onSecondary = onSecondary,
-            secondaryContainer = secondaryContainer,
-            onSecondaryContainer = onSecondaryContainer,
-            tertiary = tertiary,
-            onTertiary = onTertiary,
-            tertiaryContainer = tertiaryContainer,
-            onTertiaryContainer = onTertiaryContainer,
-            error = Color(0xFFB3261E),
-            onError = Color(0xFFFFFFFF),
-            errorContainer = Color(0xFFF9DEDC),
-            onErrorContainer = Color(0xFF410E0B),
-            background = surface,
-            onBackground = onSurface,
-            surface = surface,
-            onSurface = onSurface,
-            surfaceVariant = surfaceVariant,
-            onSurfaceVariant = onSurfaceVariant,
-            outline = Color(0xFF79747E),
-            outlineVariant = Color(0xFFCAC4D0),
-            inverseSurface = Color(0xFF313033),
-            inverseOnSurface = Color(0xFFF4EFF4),
-            inversePrimary = hslToColor(h, (s * 0.8f).coerceAtMost(1f), 0.8f),
-            surfaceDim = Color(0xFFDED8E1),
-            surfaceBright = Color(0xFFFFFBFE),
-            surfaceContainerLowest = Color(0xFFFFFFFF),
-            surfaceContainerLow = Color(0xFFF7F2FA),
-            surfaceContainer = Color(0xFFF3EDF7),
-            surfaceContainerHigh = Color(0xFFECE6F0),
-            surfaceContainerHighest = Color(0xFFE6E0E9),
-        )
-    }
-}
-
 @Composable
 fun WrtTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     seedColor: Color? = null,
     content: @Composable () -> Unit,
 ) {
-    // 色板按输入缓存：重建整套 colorScheme 是纯计算，不必每次组合都跑
     val seed = seedColor ?: Color(0xFF0E84B5)
-    val colorScheme = remember(seed, darkTheme) { generateColorScheme(seed, darkTheme) }
+    // Vibrant = 提饱和风格；isAmoled 无默认值需显式传
+    val vibrant = dynamicColorScheme(
+        seedColor = seed,
+        isDark = darkTheme,
+        isAmoled = false,
+        style = PaletteStyle.Vibrant,
+    )
+    // 中性表面（与 一致）：蓝灰彩底 → 中性灰；文本角色保留 Vibrant（对比度实测达标）
+    val colorScheme = if (darkTheme) {
+        vibrant.copy(
+            background = Color(0xFF191C1E),
+            surface = Color(0xFF191C1E),
+            surfaceContainerLowest = Color(0xFF14171A),
+            surfaceContainerLow = Color(0xFF1D2022),
+            surfaceContainer = Color(0xFF282A2C),
+            surfaceContainerHigh = Color(0xFF333537),
+            surfaceContainerHighest = Color(0xFF333537),
+            surfaceVariant = Color(0xFF282A2C),
+        )
+    } else {
+        vibrant.copy(
+            background = Color(0xFFFBFCFF),
+            surface = Color(0xFFFBFCFF),
+            surfaceContainerLowest = Color(0xFFFFFFFF),
+            surfaceContainerLow = Color(0xFFF3F3F6),
+            surfaceContainer = Color(0xFFEDEEF0),
+            surfaceContainerHigh = Color(0xFFE2E2E5),
+            surfaceContainerHighest = Color(0xFFE2E2E5),
+            surfaceVariant = Color(0xFFEDEEF0),
+        )
+    }
 
     MaterialTheme(
         colorScheme = colorScheme,

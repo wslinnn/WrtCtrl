@@ -120,7 +120,7 @@
     <string name="home_memory_usage">Memory Usage</string>
     <string name="home_cpu">CPU</string>
     <string name="home_memory">Memory</string>
-    <string name="home_resource_monitor">Resource Monitor</string>
+    <string name="home_resource_monitor">Resources</string>
     <string name="home_memory_cache">Memory Cache</string>
     <string name="home_connections">NAT sessions</string>
     <string name="home_network_status">Network info</string>
@@ -187,7 +187,7 @@
     <string name="network_device_type_vlan">VLAN</string>
     <string name="network_device_type_tunnel">Tunnel</string>
     <string name="client_title">Clients</string>
-    <string name="client_wireless_clients">Wireless Clients</string>
+    <string name="client_wireless_clients">Wireless clients</string>
     <string name="client_dhcpv4_allocation">DHCPv4 Leases</string>
     <string name="client_dhcpv6_allocation">DHCPv6 Leases</string>
     <string name="client_wireless_clients_loading">Loading wireless clients...</string>
@@ -369,13 +369,13 @@
     <string name="apps_route">Routing Table</string>
     <string name="apps_process">Processes</string>
     <string name="apps_startup">Startup Items</string>
-    <string name="apps_reboot">Reboot</string>
+    <string name="apps_reboot">Reboot router</string>
     <string name="apps_factory_reset">Factory Reset</string>
-    <string name="apps_diag">Diagnostics</string>
+    <string name="apps_diag">Network diagnostics</string>
     <string name="apps_syslog">System Log</string>
-    <string name="apps_conntrack">Connections</string>
+    <string name="apps_conntrack">NAT sessions</string>
     <string name="apps_coming_soon">Coming Soon</string>
-    <string name="apps_group_tools">Tools</string>
+    <string name="apps_group_tools">Maintenance tools</string>
     <string name="apps_group_network">Network &amp; Security</string>
     <string name="apps_group_storage">Storage</string>
     <string name="apps_group_system">System</string>

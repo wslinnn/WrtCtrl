@@ -24,4 +24,71 @@
     <string name="network_empty">No data</string>
     <!-- Load-failure state (common_load_failed reuses the generated key) -->
     <string name="client_search_clear">Clear search</string>
+    <!-- UI revamp P1: Home v2 (throughput per glossary; placeholders match the generator style) -->
+    <string name="home_realtime_throughput">Throughput</string>
+    <string name="home_downlink">↓ Downlink</string>
+    <string name="home_uplink">↑ Uplink</string>
+    <string name="home_peak">Peak</string>
+    <string name="home_disk">Disk</string>
+    <string name="home_uptime_prefix">Up %1$s</string>
+    <!-- Folded-summary key: EN abbreviates to RAM; "Memory" spelled out truncates on narrow/large-font screens -->
+    <string name="home_resource_summary">CPU %1$s · RAM %2$s · Disk %3$s</string>
+    <string name="home_ping_online">Online %1$d ms</string>
+    <string name="home_ping_offline">Offline</string>
+    <string name="home_clients_summary">Wireless %1$s · Leases %2$s</string>
+    <!-- Entry words (reused by P2/P3) -->
+    <string name="entry_trend">Trend →</string>
+    <string name="entry_details">Details →</string>
+    <string name="entry_diag">Diagnostics →</string>
+    <!-- UI revamp P2: statistics (throughput per glossary) -->
+    <string name="statistics_throughput">Throughput</string>
+    <string name="statistics_window_transfer">Window transfer</string>
+    <!-- UI revamp P2: clients (row slimming; terms per glossary) -->
+    <string name="client_dhcp_leases">DHCP leases</string>
+    <string name="client_static">Static</string>
+    <string name="client_lease_remaining">Remaining %1$s</string>
+    <string name="client_band">Band</string>
+    <string name="client_no_leases">No leases</string>
+    <string name="client_leases_loading">Loading leases…</string>
+    <string name="client_no_hostname">Unknown host</string>
+    <!-- UI revamp P2: network (three-layer cards; "carries" phrasing per glossary) -->
+    <string name="network_sys_devices">System devices</string>
+    <string name="network_not_connected">Not connected</string>
+    <string name="network_ipv6_only">IPv6 only</string>
+    <string name="network_no_address">No address</string>
+    <string name="network_boot_total">Since boot</string>
+    <string name="network_carrying">Carries %1$s</string>
+    <string name="network_assoc_online">%1$d online</string>
+    <!-- Signal tiers (glossary, closed set) -->
+    <string name="signal_excellent">Excellent</string>
+    <string name="signal_good">Good</string>
+    <string name="signal_fair">Fair</string>
+    <string name="signal_weak">Weak</string>
+    <string name="signal_poor">Poor</string>
+    <!-- UI revamp P3: plugin/tool capability subtitles (glossary phrasing) + device switch sheet -->
+    <string name="device_sheet_title">Choose router</string>
+    <string name="device_sheet_manage">Manage devices</string>
+    <string name="desc_route">IPv4 · IPv6</string>
+    <string name="desc_process">CPU · Memory</string>
+    <string name="desc_startup">System services</string>
+    <string name="desc_diag">ping · traceroute · DNS</string>
+    <string name="desc_syslog">syslog · dmesg</string>
+    <string name="desc_conntrack">NAT session table</string>
+    <string name="desc_arpbind">Static ARP bindings</string>
+    <string name="desc_firewall">Rules · Zones · Forwards</string>
+    <string name="desc_upnp">Automatic port mapping</string>
+    <string name="desc_wolultra">Wake with magic packet</string>
+    <string name="desc_samba">Samba</string>
+    <string name="desc_cifs">Network share mount</string>
+    <string name="desc_usb_printer">USB printer server</string>
+    <string name="desc_autoreboot">Scheduled reboots</string>
+    <!-- Apps page group name (two sections: Plugins / Maintenance tools—latter via OVERRIDES on apps_group_tools) -->
+    <string name="apps_group_plugins">Plugins</string>
+    <!-- WiFi password reveal/copy + QR -->
+    <string name="wifi_not_shareable">This network cannot be shared via QR code</string>
+    <string name="wifi_open_network">No password</string>
+    <string name="wifi_qr_zoom">Zoom</string>
+    <string name="wifi_secret_failed">Failed to load password</string>
+    <string name="wifi_secret_retry">Retry</string>
+    <string name="wifi_ssid_label">SSID</string>
 </resources>

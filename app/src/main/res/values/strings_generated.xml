@@ -120,7 +120,7 @@
     <string name="home_memory_usage">内存占用</string>
     <string name="home_cpu">CPU</string>
     <string name="home_memory">内存</string>
-    <string name="home_resource_monitor">资源监控</string>
+    <string name="home_resource_monitor">资源</string>
     <string name="home_memory_cache">内存缓存</string>
     <string name="home_connections">NAT 会话</string>
     <string name="home_network_status">网络信息</string>
@@ -187,7 +187,7 @@
     <string name="network_device_type_vlan">VLAN</string>
     <string name="network_device_type_tunnel">隧道</string>
     <string name="client_title">终端</string>
-    <string name="client_wireless_clients">无线终端</string>
+    <string name="client_wireless_clients">无线客户端</string>
     <string name="client_dhcpv4_allocation">DHCPv4分配</string>
     <string name="client_dhcpv6_allocation">DHCPv6分配</string>
     <string name="client_wireless_clients_loading">正在加载无线客户端...</string>
@@ -369,13 +369,13 @@
     <string name="apps_route">路由表</string>
     <string name="apps_process">系统进程</string>
     <string name="apps_startup">启动项</string>
-    <string name="apps_reboot">重启</string>
+    <string name="apps_reboot">重启路由器</string>
     <string name="apps_factory_reset">复位</string>
-    <string name="apps_diag">诊断</string>
+    <string name="apps_diag">网络诊断</string>
     <string name="apps_syslog">系统日志</string>
-    <string name="apps_conntrack">活动连接</string>
+    <string name="apps_conntrack">NAT 会话</string>
     <string name="apps_coming_soon">即将推出</string>
-    <string name="apps_group_tools">常用工具</string>
+    <string name="apps_group_tools">维护工具</string>
     <string name="apps_group_network">网络与安全</string>
     <string name="apps_group_storage">存储与共享</string>
     <string name="apps_group_system">系统维护</string>
