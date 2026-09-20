@@ -132,6 +132,8 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.vico.compose)
     implementation(libs.reorderable)
+    implementation(libs.zxing.core)
+    implementation(libs.material.kolor)
     implementation(libs.kotlinx.coroutines.android)
     debugImplementation(libs.androidx.ui.tooling)
 
