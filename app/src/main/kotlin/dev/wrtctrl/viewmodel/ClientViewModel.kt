@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.wrtctrl.R
 import dev.wrtctrl.bridge.WrtCore
+import dev.wrtctrl.util.OuiDb
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -41,6 +42,8 @@ data class ClientUiState(
     val busyMac: String? = null,
     /** 写失败分类文案（一次性事件，Screen 呈现后 consumeWriteError 清除） */
     val writeError: String? = null,
+    /** MAC 小写 → 厂商（本地 OUI 库；未命中/随机 MAC 缺席 → 通用图标） */
+    val vendors: Map<String, OuiDb.VendorInfo> = emptyMap(),
 )
 
 /**
@@ -127,6 +130,8 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
         if (gen != generation) return
+        // 厂商识别：四源 MAC 并集本地 OUI 查询（纯 app 本地，无桥接调用）
+        val vendorProfiles = vendorProfiles(profileMacs(clients, dhcp, statics, blocked))
         _state.update {
             it.copy(
                 loading = false,
@@ -138,6 +143,7 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
                 loadFailed = radios == null,
                 leasesLoaded = dhcp != null || it.leasesLoaded,
                 leasesFailed = dhcp == null && !it.leasesLoaded,
+                vendors = vendorProfiles.takeIf { map -> map != it.vendors } ?: it.vendors,
             )
         }
     }
@@ -419,6 +425,26 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
     /** Screen 呈现失败 Toast 后回调清除（一次性事件） */
     fun consumeWriteError() {
         _state.update { if (it.writeError == null) it else it.copy(writeError = null) }
+    }
+
+    /** 四源 MAC 并集的厂商识别（本地 OUI 库进程级懒加载；查不到/随机 MAC 缺席 → 通用图标） */
+    private suspend fun vendorProfiles(macs: Set<String>): Map<String, OuiDb.VendorInfo> {
+        if (macs.isEmpty()) return emptyMap()
+        val db = OuiDb.get(getApplication())
+        return macs.mapNotNull { mac -> db.vendorOf(mac)?.let { mac.lowercase() to it } }.toMap()
+    }
+
+    /** 厂商识别的输入域：无线客户端 ∪ DHCP 租约 ∪ 静态租约 ∪ 已封禁 的全部 MAC */
+    private fun profileMacs(
+        clients: List<WifiClient>,
+        dhcp: Pair<List<DhcpLease>, List<DhcpLease>>?,
+        statics: List<StaticHost>?,
+        blocked: Map<String, String>?,
+    ): Set<String> = buildSet {
+        clients.forEach { add(it.mac) }
+        dhcp?.let { (v4, v6) -> (v4 + v6).forEach { l -> l.macaddr?.let(::add) } }
+        statics?.forEach { add(it.mac) }
+        blocked?.keys?.forEach(::add)
     }
 
     private suspend fun ubusSafe(

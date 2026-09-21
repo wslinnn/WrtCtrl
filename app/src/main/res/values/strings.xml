@@ -79,6 +79,8 @@
     <string name="client_unstatic_confirm_body">将删除该设备的 IP 绑定，恢复动态分配，即时生效。</string>
     <string name="client_unstatic_confirm_ok">取消绑定</string>
     <string name="client_static_failed">静态租约写入失败，请重试</string>
+    <!-- 厂商识别：本地 OUI 库，展开区命中才显示 -->
+    <string name="client_vendor">厂商</string>
     <!-- UI 改版 P2：网络页（三层结构 + 承载句式见规约 11） -->
     <string name="network_sys_devices">系统设备</string>
     <string name="network_not_connected">未连接</string>

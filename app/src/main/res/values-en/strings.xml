@@ -77,6 +77,8 @@
     <string name="client_unstatic_confirm_body">Deletes the IP binding for this device and restores dynamic assignment, effective immediately.</string>
     <string name="client_unstatic_confirm_ok">Unbind</string>
     <string name="client_static_failed">Failed to write the static lease, please retry</string>
+    <!-- Vendor identification: local OUI DB, shown in expanded area only on hit -->
+    <string name="client_vendor">Vendor</string>
     <!-- UI revamp P2: network (three-layer cards; "carries" phrasing per glossary) -->
     <string name="network_sys_devices">System devices</string>
     <string name="network_not_connected">Not connected</string>

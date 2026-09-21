@@ -6,6 +6,7 @@ package dev.wrtctrl.ui.screen
 
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.PushPin
@@ -54,8 +56,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -75,6 +80,7 @@ import dev.wrtctrl.ui.component.StatusBadge
 import dev.wrtctrl.ui.component.badgeToneColor
 import dev.wrtctrl.ui.component.BadgeTone
 import dev.wrtctrl.util.Format
+import dev.wrtctrl.util.OuiDb
 import dev.wrtctrl.viewmodel.ClientParsers
 import dev.wrtctrl.viewmodel.ClientUiState
 import dev.wrtctrl.viewmodel.ClientViewModel
@@ -159,7 +165,11 @@ fun ClientScreen(vm: ClientViewModel, deviceId: String?, modifier: Modifier = Mo
                 if (blockedFiltered.isNotEmpty()) {
                     item { GroupHeader(stringResource(R.string.client_blocked_section), Modifier.padding(top = 8.dp)) }
                     items(blockedFiltered, key = { "blocked_${it.mac}" }) { entry ->
-                        BlockedRow(entry, busy = state.busyMac == entry.mac) { mac, name ->
+                        BlockedRow(
+                            entry,
+                            vendor = state.vendors[entry.mac],
+                            busy = state.busyMac == entry.mac,
+                        ) { mac, name ->
                             requestWrite("unblock", mac, name, null)
                         }
                     }
@@ -167,7 +177,11 @@ fun ClientScreen(vm: ClientViewModel, deviceId: String?, modifier: Modifier = Mo
                 if (staticFiltered.isNotEmpty()) {
                     item { GroupHeader(stringResource(R.string.client_static_section), Modifier.padding(top = 8.dp)) }
                     items(staticFiltered, key = { "static_${it.section}" }) { entry ->
-                        StaticRow(entry, busy = state.busyMac == entry.mac.lowercase()) { mac, name ->
+                        StaticRow(
+                            entry,
+                            vendor = state.vendors[entry.mac.lowercase()],
+                            busy = state.busyMac == entry.mac.lowercase(),
+                        ) { mac, name ->
                             requestWrite("unbindStatic", mac, name, null)
                         }
                     }
@@ -247,9 +261,9 @@ private fun SummaryCard(state: ClientUiState) {
     }
 }
 
-/** 无线客户端行：名称（+已拉黑徽章）+ IP + 信号条；展开区 = MAC/连接时长/频段 + 拉黑/静态动作 */
+/** 无线客户端行：厂商 chip + 名称（+已拉黑徽章）+ IP + 信号条；展开区 = MAC/厂商/连接时长/频段 + 拉黑/静态动作 */
 @Composable
-private fun WirelessRow(client: WifiClient, actions: ClientActions) {
+private fun WirelessRow(client: WifiClient, vendor: OuiDb.VendorInfo?, actions: ClientActions) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth()) {
         Column {
@@ -260,6 +274,8 @@ private fun WirelessRow(client: WifiClient, actions: ClientActions) {
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                VendorChip(vendor, VendorChipTone.NEUTRAL)
+                Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -297,6 +313,7 @@ private fun WirelessRow(client: WifiClient, actions: ClientActions) {
             AnimatedVisibility(visible = expanded) {
                 Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp)) {
                     CopyableRow(label = stringResource(R.string.client_mac), value = client.mac)
+                    vendor?.let { InfoRow(stringResource(R.string.client_vendor), it.name) }
                     InfoRow(stringResource(R.string.client_connection_time), Format.duration(client.connectedTime))
                     client.band?.let { InfoRow(stringResource(R.string.client_band), it) }
                     actions.onToggleBlock?.let { onToggle ->
@@ -325,10 +342,10 @@ private fun WirelessRow(client: WifiClient, actions: ClientActions) {
     }
 }
 
-/** 租约行：名称（+已拉黑徽章）+ IP + 静态徽章/「动态 · 剩余 X」；展开区 = MAC（v4）/ MAC + DUID（v6）+ 动作。
- *  v6 DUID-only 租约（无 macaddr）不显动作行。 */
+/** 租约行：厂商 chip + 名称（+已拉黑徽章）+ IP + 静态徽章/「动态 · 剩余 X」；展开区 = MAC（v4）/ MAC + DUID（v6）+ 厂商 + 动作。
+ *  v6 DUID-only 租约（无 macaddr）不显 MAC/DUID 相关动作。 */
 @Composable
-private fun LeaseRow(lease: DhcpLease, isStatic: Boolean, isV6: Boolean, actions: ClientActions) {
+private fun LeaseRow(lease: DhcpLease, vendor: OuiDb.VendorInfo?, isStatic: Boolean, isV6: Boolean, actions: ClientActions) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth()) {
         Column {
@@ -339,6 +356,8 @@ private fun LeaseRow(lease: DhcpLease, isStatic: Boolean, isV6: Boolean, actions
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                VendorChip(vendor, VendorChipTone.NEUTRAL)
+                Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -391,6 +410,7 @@ private fun LeaseRow(lease: DhcpLease, isStatic: Boolean, isV6: Boolean, actions
                     // v6 租约可能无 macaddr（DUID-only 客户端），有才显行
                     lease.macaddr?.let { CopyableRow(stringResource(R.string.client_mac), it) }
                     if (isV6) lease.duid?.let { CopyableRow(stringResource(R.string.client_duid), it) }
+                    vendor?.let { InfoRow(stringResource(R.string.client_vendor), it.name) }
                     actions.onToggleBlock?.let { onToggle ->
                         ActionRow(
                             icon = if (actions.blocked) Icons.Filled.Check else Icons.Filled.Block,
@@ -429,10 +449,15 @@ private fun LeaseRow(lease: DhcpLease, isStatic: Boolean, isV6: Boolean, actions
 /** 已封禁区块条目：MAC 主键 + 尽力反查的名称/IP（动态租约 → 静态租约；查不到为 null 只显 MAC） */
 private data class BlockedEntry(val mac: String, val name: String?, val ip: String?)
 
-/** 已封禁行：禁止图标 + 名称/MAC；展开区 MAC（复制）+ 解除动作——
+/** 已封禁行：厂商 chip（err 着色 = 危险线索）+ 名称/MAC；展开区 MAC（复制）+ 厂商 + 解除动作——
  *  与客户端行同一确认弹窗状态机，设备离线/无租约也可解除 */
 @Composable
-private fun BlockedRow(entry: BlockedEntry, busy: Boolean, onUnblock: (mac: String, name: String) -> Unit) {
+private fun BlockedRow(
+    entry: BlockedEntry,
+    vendor: OuiDb.VendorInfo?,
+    busy: Boolean,
+    onUnblock: (mac: String, name: String) -> Unit,
+) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth()) {
         Column {
@@ -443,19 +468,7 @@ private fun BlockedRow(entry: BlockedEntry, busy: Boolean, onUnblock: (mac: Stri
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(
-                    Modifier
-                        .size(32.dp)
-                        .background(MaterialTheme.colorScheme.error.copy(alpha = 0.12f), RoundedCornerShape(10.dp)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Filled.Block,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.error,
-                    )
-                }
+                VendorChip(vendor, VendorChipTone.DANGER)
                 Column(Modifier.weight(1f).padding(start = 10.dp)) {
                     Text(
                         entry.name ?: entry.mac,
@@ -494,6 +507,7 @@ private fun BlockedRow(entry: BlockedEntry, busy: Boolean, onUnblock: (mac: Stri
             AnimatedVisibility(visible = expanded) {
                 Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp)) {
                     CopyableRow(label = stringResource(R.string.client_mac), value = entry.mac)
+                    vendor?.let { InfoRow(stringResource(R.string.client_vendor), it.name) }
                     ActionRow(
                         icon = Icons.Filled.Check,
                         text = stringResource(R.string.client_unblock_action),
@@ -507,10 +521,15 @@ private fun BlockedRow(entry: BlockedEntry, busy: Boolean, onUnblock: (mac: Stri
     }
 }
 
-/** 静态租约行：图钉 + 名称/MAC + 绑定 IP；展开区 MAC（复制）+ 取消绑定——
+/** 静态租约行：名称/MAC + 绑定 IP；展开区 MAC（复制）+ 厂商 + 取消绑定——
  *  离线绑定设备同样可管理（与已封禁组同款解耦） */
 @Composable
-private fun StaticRow(entry: StaticHost, busy: Boolean, onUnbind: (mac: String, name: String) -> Unit) {
+private fun StaticRow(
+    entry: StaticHost,
+    vendor: OuiDb.VendorInfo?,
+    busy: Boolean,
+    onUnbind: (mac: String, name: String) -> Unit,
+) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth()) {
         Column {
@@ -521,22 +540,7 @@ private fun StaticRow(entry: StaticHost, busy: Boolean, onUnbind: (mac: String, 
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(
-                    Modifier
-                        .size(32.dp)
-                        .background(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                            RoundedCornerShape(10.dp),
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Filled.PushPin,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                }
+                VendorChip(vendor, VendorChipTone.PRIMARY)
                 Column(Modifier.weight(1f).padding(start = 10.dp)) {
                     Text(
                         entry.name ?: entry.mac,
@@ -573,6 +577,7 @@ private fun StaticRow(entry: StaticHost, busy: Boolean, onUnbind: (mac: String, 
             AnimatedVisibility(visible = expanded) {
                 Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp)) {
                     CopyableRow(label = stringResource(R.string.client_mac), value = entry.mac)
+                    vendor?.let { InfoRow(stringResource(R.string.client_vendor), it.name) }
                     ActionRow(
                         icon = Icons.Filled.PushPin,
                         text = stringResource(R.string.client_unstatic_action),
@@ -582,6 +587,44 @@ private fun StaticRow(entry: StaticHost, busy: Boolean, onUnbind: (mac: String, 
                     )
                 }
             }
+        }
+    }
+}
+
+/** 厂商 chip 着色语义：状态用 chip 底色/logo 色表达，未命中厂商也保持状态线索 */
+private enum class VendorChipTone { NEUTRAL, PRIMARY, DANGER }
+
+/** 设备行首厂商 chip：38dp 圆角 + 单色品牌 logo——
+ *  识别走本地 OUI 库（随机 MAC 不查询，机制对齐 luci-app-oui）；未命中回落通用 Devices 图标。
+ *  宽扁 logo（如 gigabyte）经 Image ContentScale.Fit 等比缩放，不用 Icon 硬拉伸 */
+@Composable
+private fun VendorChip(vendor: OuiDb.VendorInfo?, tone: VendorChipTone) {
+    val scheme = MaterialTheme.colorScheme
+    val (bg, fg) = when (tone) {
+        VendorChipTone.NEUTRAL -> scheme.surfaceContainerHigh to scheme.onSurface
+        VendorChipTone.PRIMARY -> scheme.primary.copy(alpha = 0.12f) to scheme.primary
+        VendorChipTone.DANGER -> scheme.error.copy(alpha = 0.12f) to scheme.error
+    }
+    Box(
+        Modifier.size(38.dp).background(bg, RoundedCornerShape(12.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        val drawable = vendor?.let { VENDOR_DRAWABLES[it.slug] }
+        if (drawable != null) {
+            Image(
+                painterResource(drawable),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize().padding(8.dp),
+                contentScale = ContentScale.Fit,
+                colorFilter = ColorFilter.tint(fg),
+            )
+        } else {
+            Icon(
+                Icons.Filled.Devices,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = fg,
+            )
         }
     }
 }
@@ -716,6 +759,7 @@ private fun LazyListScope.wirelessSection(
             val macUpper = client.mac.uppercase()
             WirelessRow(
                 client,
+                vendor = state.vendors[macNorm],
                 ClientActions(
                     blocked = macNorm in state.blockedMacs,
                     staticBound = macUpper in staticMacSet,
@@ -780,6 +824,7 @@ private fun blockableLease(
     val staticBound = macUpper != null && macUpper in staticMacSet
     LeaseRow(
         lease,
+        vendor = macNorm?.let { state.vendors[it] },
         isStatic = staticBound,
         isV6 = isV6,
         ClientActions(
