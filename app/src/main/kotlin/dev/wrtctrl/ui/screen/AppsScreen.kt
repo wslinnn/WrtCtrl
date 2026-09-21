@@ -49,6 +49,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -89,6 +90,9 @@ fun AppsScreen(
     val comingSoon = stringResource(R.string.apps_coming_soon)
     // 工具页覆盖：组合级分支，返回键由 ToolPage 自带 BackHandler 兜底，此处仅记 id
     var openToolId by rememberSaveable { mutableStateOf<String?>(null) }
+    // 状态保留规范：工具页 ↔ 列表互为覆盖分支，组合销毁会丢
+    // LazyVerticalGrid 滚动位置——两分支经 holder 按 key 保存恢复
+    val appsHolder = rememberSaveableStateHolder()
     // 首页网络卡直达：消费外部带入的工具 id 后回调清空，避免再组合时重复打开
     LaunchedEffect(pendingToolId) {
         if (pendingToolId != null && isToolId(pendingToolId)) {
@@ -99,53 +103,57 @@ fun AppsScreen(
     val toolId = openToolId
     if (toolId != null) {
         // 工具页与外层下拉刷新结构互斥：诊断/重启页无内层刷新，宿主 PTR 不得越权重探测插件
-        ToolRouter(
-            toolId = toolId,
-            deviceId = deviceId,
-            onBack = { openToolId = null },
-            onSessionLost = onSessionLost,
-        )
+        appsHolder.SaveableStateProvider("tool_$toolId") {
+            ToolRouter(
+                toolId = toolId,
+                deviceId = deviceId,
+                onBack = { openToolId = null },
+                onSessionLost = onSessionLost,
+            )
+        }
     } else {
-        PullToRefreshBox(
-            isRefreshing = state.refreshing,
-            onRefresh = vm::refresh,
-            modifier = modifier.fillMaxSize(),
-        ) {
-            when {
-                state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
+        appsHolder.SaveableStateProvider("apps_list") {
+            PullToRefreshBox(
+                isRefreshing = state.refreshing,
+                onRefresh = vm::refresh,
+                modifier = modifier.fillMaxSize(),
+            ) {
+                when {
+                    state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
 
-                else -> {
-                    // 两段结构：插件（luci）一个 grid + 维护工具一张单卡——
-                    // 四分组保留为 AppGroupId 内部归类，不再各自出 sechead
-                    val (plugins, tools) = remember(state.installed) { AppRegistry.visibleSections(state.installed) }
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        item(key = "header_plugins", span = { GridItemSpan(maxLineSpan) }) {
-                            GroupHeader(
-                                stringResource(R.string.apps_group_plugins),
-                                Modifier.padding(top = 12.dp, bottom = 4.dp),
-                            )
-                        }
-                        items(count = plugins.size, key = { i -> "plugin_${plugins[i].id}" }) { i ->
-                            PluginTile(app = plugins[i], onClick = {
-                                Toast.makeText(context, comingSoon, Toast.LENGTH_SHORT).show()
-                            })
-                        }
-                        item(key = "header_tools", span = { GridItemSpan(maxLineSpan) }) {
-                            GroupHeader(
-                                stringResource(R.string.apps_group_tools),
-                                Modifier.padding(top = 12.dp, bottom = 4.dp),
-                            )
-                        }
-                        item(key = "tools_card", span = { GridItemSpan(maxLineSpan) }) {
-                            ToolsCard(tools) { openToolId = it }
+                    else -> {
+                        // 两段结构：插件（luci）一个 grid + 维护工具一张单卡——
+                        // 四分组保留为 AppGroupId 内部归类，不再各自出 sechead
+                        val (plugins, tools) = remember(state.installed) { AppRegistry.visibleSections(state.installed) }
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(2),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            item(key = "header_plugins", span = { GridItemSpan(maxLineSpan) }) {
+                                GroupHeader(
+                                    stringResource(R.string.apps_group_plugins),
+                                    Modifier.padding(top = 12.dp, bottom = 4.dp),
+                                )
+                            }
+                            items(count = plugins.size, key = { i -> "plugin_${plugins[i].id}" }) { i ->
+                                PluginTile(app = plugins[i], onClick = {
+                                    Toast.makeText(context, comingSoon, Toast.LENGTH_SHORT).show()
+                                })
+                            }
+                            item(key = "header_tools", span = { GridItemSpan(maxLineSpan) }) {
+                                GroupHeader(
+                                    stringResource(R.string.apps_group_tools),
+                                    Modifier.padding(top = 12.dp, bottom = 4.dp),
+                                )
+                            }
+                            item(key = "tools_card", span = { GridItemSpan(maxLineSpan) }) {
+                                ToolsCard(tools) { openToolId = it }
+                            }
                         }
                     }
                 }

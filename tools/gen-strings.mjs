@@ -75,6 +75,8 @@ const OVERRIDES = {
 // - client_tip / client_confirm_disconnect / client_disconnect_success / client_disconnect_failed:
 //   踢人功能整体移除
 // - apps_no_plugins: 应用中心「无可用插件」空态不可达——7 固定工具 probeConfig=null 恒显
+// - language_* / device_list_language_settings: 独立语言设置页删除（
+//   顶栏三态循环切换入口，prototype 全局规范节）；language_follow_system 手写键同步删除
 const DROP_KEYS = new Set([
   'device_list_ping_hint',
   'client_tip',
@@ -82,6 +84,14 @@ const DROP_KEYS = new Set([
   'client_disconnect_success',
   'client_disconnect_failed',
   'apps_no_plugins',
+  'language_title',
+  'language_current_language',
+  'language_switch_language',
+  'language_switch_success',
+  'language_restart_required',
+  'language_chinese',
+  'language_english',
+  'device_list_language_settings',
 ]);
 
 const zh = JSON.parse(readFileSync(join(localeDir, 'zh-Hans.json'), 'utf8'));

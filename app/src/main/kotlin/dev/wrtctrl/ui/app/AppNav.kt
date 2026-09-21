@@ -48,6 +48,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,7 +77,6 @@ import dev.wrtctrl.ui.screen.DashboardEditScreen
 import dev.wrtctrl.ui.screen.DeviceGateScreen
 import dev.wrtctrl.ui.screen.HomeScreen
 import dev.wrtctrl.ui.screen.LanguageAction
-import dev.wrtctrl.ui.screen.LanguageScreen
 import dev.wrtctrl.ui.screen.NetworkScreen
 import dev.wrtctrl.ui.screen.StatisticsScreen
 import dev.wrtctrl.ui.screen.ThemeAction
@@ -105,10 +106,11 @@ fun AppRoot() {
     val app = LocalContext.current.applicationContext as Application
     val vm: AppViewModel = viewModel(factory = viewModelFactory { initializer { AppViewModel(app) } })
     val phase by vm.phase.collectAsStateWithLifecycle()
-    var showLanguage by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var crashText by remember { mutableStateOf<String?>(null) }
+    // 主界面组合状态经 holder 跨「门控往返」保存恢复；语言/主题切换的 Activity 重建走系统 savedInstanceState 恢复
+    val mainHolder = rememberSaveableStateHolder()
     // 深浅色三态全局生效：ThemeAction 只写偏好，这里集中驱动 AppCompatDelegate
     val themePrefs = remember { ThemePrefs(app.applicationContext) }
     val themeMode by themePrefs.modeFlow().collectAsStateWithLifecycle(ThemeMode.FOLLOW_SYSTEM)
@@ -128,13 +130,12 @@ fun AppRoot() {
 
     // 崩溃卡用浮层呈现：状态栏避让 + 悬浮于内容上方（不挤压布局、不产生空隙）
     Box(Modifier.fillMaxSize()) {
-        when {
-            showLanguage -> LanguageScreen(onBack = { showLanguage = false })
-            phase == Phase.Boot -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        when (phase) {
+            Phase.Boot -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
-            phase == Phase.Gate -> DeviceGateScreen(vm, onOpenLanguage = { showLanguage = true })
-            phase == Phase.Main -> MainTabs(vm, onOpenLanguage = { showLanguage = true })
+            Phase.Gate -> DeviceGateScreen(vm)
+            Phase.Main -> mainHolder.SaveableStateProvider("main") { MainTabs(vm) }
         }
         crashText?.let { crash ->
             Card(
@@ -194,14 +195,18 @@ fun AppRoot() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
-    var selected by remember { mutableIntStateOf(0) }
-    var showDashboardEdit by remember { mutableStateOf(false) }
+private fun MainTabs(vm: AppViewModel) {
+    // 状态保留规范：saveable 化后语言/主题切换的 Activity 重建、门控往返
+    // 都回到原 Tab 与原覆盖页；各 Tab 内容经 holder 按键保存恢复滚动位置
+    var selected by rememberSaveable { mutableIntStateOf(0) }
+    var showDashboardEdit by rememberSaveable { mutableStateOf(false) }
     // 首页网络卡直达工具（NAT 会话→conntrack、DOWN 接口→诊断）：切到应用 Tab 并带开工具页
-    var pendingTool by remember { mutableStateOf<String?>(null) }
-    // 设备切换底部弹层（▾ / 顶栏设备图标共用）：连接成功（current 变更）自动收起
-    var showDeviceSheet by remember { mutableStateOf(false) }
-    var sheetTargetId by remember { mutableStateOf<String?>(null) }
+    var pendingTool by rememberSaveable { mutableStateOf<String?>(null) }
+    val tabHolder = rememberSaveableStateHolder()
+    // 设备切换底部弹层（▾ / 顶栏设备图标共用）：连接成功（current 变更）自动收起。
+    // saveable：弹层开着时语言/主题切换重建后重开——连接进行中/失败横幅不静默丢失
+    var showDeviceSheet by rememberSaveable { mutableStateOf(false) }
+    var sheetTargetId by rememberSaveable { mutableStateOf<String?>(null) }
     val gate by vm.gate.collectAsStateWithLifecycle()
     val app = LocalContext.current.applicationContext as Application
     val homeVm: HomeViewModel = viewModel(
@@ -265,7 +270,7 @@ private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
                         Icon(Icons.Filled.Devices, contentDescription = stringResource(R.string.device_list_history_title))
                     }
                     ThemeAction()
-                    LanguageAction(onOpenLanguage)
+                    LanguageAction()
                 },
             )
         },
@@ -287,30 +292,43 @@ private fun MainTabs(vm: AppViewModel, onOpenLanguage: () -> Unit) {
                 0 -> {
                     // 注意：Scaffold padding 已由外层 Box 消费，此处不可再叠加（双重空白的根因）
                     if (showDashboardEdit) {
-                        DashboardEditScreen(homeVm, onBack = { showDashboardEdit = false })
+                        // 编辑页与首页同属覆盖互斥分支：holder 按键保编辑页滚动状态（与工具页同形态）
+                        tabHolder.SaveableStateProvider("dash_edit") {
+                            DashboardEditScreen(homeVm, onBack = { showDashboardEdit = false })
+                        }
                     } else {
-                        HomeScreen(
-                            homeVm,
-                            onGotoTab = { selected = it },
-                            onOpenTool = {
-                                pendingTool = it
-                                selected = 4
-                            },
-                            modifier = Modifier.fillMaxSize(),
-                        )
+                        tabHolder.SaveableStateProvider(0) {
+                            HomeScreen(
+                                homeVm,
+                                onGotoTab = { selected = it },
+                                onOpenTool = {
+                                    pendingTool = it
+                                    selected = 4
+                                },
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
                     }
                 }
-                1 -> StatisticsScreen(statisticsVm, currentDevice?.id, Modifier.fillMaxSize())
-                2 -> ClientScreen(clientVm, currentDevice?.id, Modifier.fillMaxSize())
-                3 -> NetworkScreen(networkVm, currentDevice?.id, Modifier.fillMaxSize())
-                else -> AppsScreen(
-                    appsVm,
-                    currentDevice?.id,
-                    pendingToolId = pendingTool,
-                    onToolConsumed = { pendingTool = null },
-                    onSessionLost = { vm.openDeviceList() },
-                    modifier = Modifier.fillMaxSize(),
-                )
+                1 -> tabHolder.SaveableStateProvider(1) {
+                    StatisticsScreen(statisticsVm, currentDevice?.id, Modifier.fillMaxSize())
+                }
+                2 -> tabHolder.SaveableStateProvider(2) {
+                    ClientScreen(clientVm, currentDevice?.id, Modifier.fillMaxSize())
+                }
+                3 -> tabHolder.SaveableStateProvider(3) {
+                    NetworkScreen(networkVm, currentDevice?.id, Modifier.fillMaxSize())
+                }
+                else -> tabHolder.SaveableStateProvider(4) {
+                    AppsScreen(
+                        appsVm,
+                        currentDevice?.id,
+                        pendingToolId = pendingTool,
+                        onToolConsumed = { pendingTool = null },
+                        onSessionLost = { vm.openDeviceList() },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
     }

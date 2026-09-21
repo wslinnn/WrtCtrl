@@ -4,7 +4,6 @@
     <string name="device_list_error_dns">DNS lookup failed: the hostname has no address on this network. If the domain is IPv6-only and your WiFi has no IPv6, use mobile data or connect via the LAN IP</string>
     <string name="device_list_error_refused">Connection refused: the device is unreachable or the port is closed. Check the device status and firewall rules</string>
     <string name="debug_last_crash">Last crash</string>
-    <string name="language_follow_system">Follow system</string>
     <string name="home_chart_collecting">Collecting data…</string>
     <!-- Dashboard card editing (card names reuse existing keys) -->
     <string name="dashboard_edit_title">Edit dashboard</string>
@@ -15,6 +14,8 @@
     <string name="theme_follow_system">Follow system</string>
     <string name="theme_dark">Dark</string>
     <string name="theme_light">Light</string>
+    <!-- Language cycle button (top-bar cycle Follow system→中文→English) -->
+    <string name="action_toggle_language">Switch language</string>
     <!-- Collapsible header semantics (a11y) -->
     <string name="common_expand">Expand</string>
     <string name="common_collapse">Collapse</string>

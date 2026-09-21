@@ -47,7 +47,6 @@
     <string name="device_list_no_device_last">Last device not found, please log in again</string>
     <string name="device_list_reconnect_failed">Connection failed, please log in again</string>
     <string name="device_list_settings">Settings</string>
-    <string name="device_list_language_settings">Language Settings</string>
     <string name="device_list_host_address">Host</string>
     <string name="device_list_port">Port</string>
     <string name="device_list_username">Username</string>
@@ -260,13 +259,6 @@
     <string name="tabbar_clients">Clients</string>
     <string name="tabbar_network">Network</string>
     <string name="tabbar_apps">Apps</string>
-    <string name="language_title">Language Settings</string>
-    <string name="language_current_language">Current Language</string>
-    <string name="language_switch_language">Switch Language</string>
-    <string name="language_chinese">中文</string>
-    <string name="language_english">English</string>
-    <string name="language_switch_success">Language switched successfully</string>
-    <string name="language_restart_required">Please restart the app to apply language settings</string>
     <string name="route_title">Routing Table</string>
     <string name="route_loading_routes">Loading routing table...</string>
     <string name="route_refresh">Refresh</string>

@@ -5,7 +5,6 @@
     <!-- 网络错误细分指引 -->
     <string name="device_list_error_dns">域名解析失败：当前网络解析不到该域名。若域名仅有 IPv6 记录而当前 WiFi 无 IPv6，请改用移动网络，或使用内网 IP 直连</string>
     <string name="device_list_error_refused">连接被拒绝：设备不可达或端口未开放，请检查设备状态与防火墙放行</string>
-    <string name="language_follow_system">跟随系统</string>
     <string name="home_chart_collecting">正在积累数据…</string>
     <string name="debug_last_crash">上次崩溃</string>
     <!-- 仪表盘卡片编辑（卡片名复用现有键） -->
@@ -17,6 +16,8 @@
     <string name="theme_follow_system">跟随系统</string>
     <string name="theme_dark">深色</string>
     <string name="theme_light">浅色</string>
+    <!-- 语言循环切换按钮 -->
+    <string name="action_toggle_language">切换语言</string>
     <!-- 折叠卡头语义（a11y） -->
     <string name="common_expand">展开</string>
     <string name="common_collapse">收起</string>

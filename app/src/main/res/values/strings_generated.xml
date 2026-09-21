@@ -47,7 +47,6 @@
     <string name="device_list_no_device_last">未找到上次设备,请重新登录</string>
     <string name="device_list_reconnect_failed">连接失败,请重新登录</string>
     <string name="device_list_settings">设置</string>
-    <string name="device_list_language_settings">语言设置</string>
     <string name="device_list_host_address">主机地址</string>
     <string name="device_list_port">端口</string>
     <string name="device_list_username">用户名</string>
@@ -260,13 +259,6 @@
     <string name="tabbar_clients">终端</string>
     <string name="tabbar_network">网络</string>
     <string name="tabbar_apps">应用</string>
-    <string name="language_title">语言设置</string>
-    <string name="language_current_language">当前语言</string>
-    <string name="language_switch_language">切换语言</string>
-    <string name="language_chinese">中文</string>
-    <string name="language_english">English</string>
-    <string name="language_switch_success">语言切换成功</string>
-    <string name="language_restart_required">请重启应用以应用语言设置</string>
     <string name="route_title">路由表</string>
     <string name="route_loading_routes">正在加载路由表...</string>
     <string name="route_refresh">刷新</string>

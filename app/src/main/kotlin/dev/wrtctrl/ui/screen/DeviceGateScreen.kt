@@ -3,6 +3,7 @@ package dev.wrtctrl.ui.screen
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -66,6 +67,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -73,6 +76,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.os.LocaleListCompat
 import android.Manifest
 import dev.wrtctrl.R
 import dev.wrtctrl.data.Device
@@ -86,24 +90,70 @@ import kotlinx.coroutines.launch
 
 /** 设备门控页（双形态）：列表（直连/编辑/删除）+ 添加·编辑表单。*/
 @Composable
-fun DeviceGateScreen(vm: AppViewModel, onOpenLanguage: () -> Unit = {}) {
+fun DeviceGateScreen(vm: AppViewModel) {
     // 快速切换场景（从主页顶栏进入）手势返回 = 取消切换回主页；启动/登录失败场景不拦截
     BackHandler(enabled = vm.gateCameFromMain) { vm.returnToMain() }
     val state by vm.gate.collectAsStateWithLifecycle()
     when (state.mode) {
-        GateMode.List -> ListMode(vm, state, onOpenLanguage)
-        GateMode.Form -> FormMode(vm, state, onOpenLanguage)
+        GateMode.List -> ListMode(vm, state)
+        GateMode.Form -> FormMode(vm, state)
     }
 }
 
-/// 语言切换入口：固定在顶栏右上角（用户反馈：不应藏在表单底部）
+private const val LANG_SYSTEM = "system"
+private const val LANG_ZH = "zh-CN"
+private const val LANG_EN = "en"
+
+private fun currentLanguageTag(): String {
+    val tags = AppCompatDelegate.getApplicationLocales().toLanguageTags()
+    return when {
+        tags.startsWith("en") -> LANG_EN
+        tags.startsWith("zh") -> LANG_ZH
+        else -> LANG_SYSTEM
+    }
+}
+
+/// 语言循环切换入口：跟随系统 → 中文 → English
+/// 三态循环，点按即切。setApplicationLocales 生效会重建 Activity，但若有效语言不变
+/// （如系统语言=目标语言）则不重建——故按钮态用本地可观察状态即时回显；recreate 后
+/// remember 重置、重读 delegate。
 @Composable
-internal fun LanguageAction(onOpenLanguage: () -> Unit) {
-    IconButton(onClick = onOpenLanguage) {
-        Icon(
-            Icons.Filled.Language,
-            contentDescription = stringResource(R.string.device_list_language_settings),
-        )
+internal fun LanguageAction() {
+    val switchDesc = stringResource(R.string.action_toggle_language)
+    var currentTag by remember { mutableStateOf(currentLanguageTag()) }
+    IconButton(
+        onClick = {
+            val next = when (currentTag) {
+                LANG_SYSTEM -> LANG_ZH
+                LANG_ZH -> LANG_EN
+                else -> LANG_SYSTEM
+            }
+            currentTag = next
+            AppCompatDelegate.setApplicationLocales(
+                if (next == LANG_SYSTEM) {
+                    LocaleListCompat.getEmptyLocaleList()
+                } else {
+                    LocaleListCompat.forLanguageTags(next)
+                },
+            )
+        },
+    ) {
+        when (currentTag) {
+            LANG_ZH -> Text(
+                "中",
+                Modifier.semantics { contentDescription = switchDesc },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            LANG_EN -> Text(
+                "EN",
+                Modifier.semantics { contentDescription = switchDesc },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            else -> Icon(
+                Icons.Filled.Language,
+                contentDescription = switchDesc,
+            )
+        }
     }
 }
 
@@ -137,7 +187,7 @@ internal fun ThemeAction() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ListMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () -> Unit) {
+private fun ListMode(vm: AppViewModel, state: GateUiState) {
     var deleting by remember { mutableStateOf<Device?>(null) }
     val context = LocalContext.current
     // LNP 授权后再续行被中断的直连；拒绝授权也继续——失败横幅/错误卡自会呈现
@@ -151,7 +201,7 @@ private fun ListMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () ->
                 title = { Text(stringResource(R.string.device_list_history_title)) },
                 actions = {
                     ThemeAction()
-                    LanguageAction(onOpenLanguage)
+                    LanguageAction()
                 },
             )
         },
@@ -340,7 +390,7 @@ private fun ExtendedAddButton(onClick: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun FormMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () -> Unit) {
+private fun FormMode(vm: AppViewModel, state: GateUiState) {
     val editing = state.editingId != null
     val hasDevices = state.devices.isNotEmpty()
     var showPassword by remember { mutableStateOf(false) }
@@ -376,7 +426,7 @@ private fun FormMode(vm: AppViewModel, state: GateUiState, onOpenLanguage: () ->
                 },
                 actions = {
                     ThemeAction()
-                    LanguageAction(onOpenLanguage)
+                    LanguageAction()
                 },
             )
         },
