@@ -59,7 +59,12 @@ pub fn classify_network_chain(chain: &str) -> NetFailureKind {
         NetFailureKind::Dns
     } else if lower.contains("refused") {
         NetFailureKind::Refused
-    } else if lower.contains("certificate") || lower.contains("tls") || lower.contains("alert") {
+    } else if lower.contains("certificate")
+        || lower.contains("tls")
+        // "alert" 单词过宽（任何含 alert 的错误链都会误判为 TLS），须与
+        // handshake 同现才归类（TLS alert 报文的标准文案是 "tls handshake alert"）
+        || (lower.contains("alert") && lower.contains("handshake"))
+    {
         NetFailureKind::Tls
     } else {
         NetFailureKind::Other

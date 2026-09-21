@@ -64,12 +64,12 @@ impl RouterClient {
     /// 登录强制以全 0 临时会话发起（旧 loginDevice 的 `sysauth: null`）——
     /// 带残留旧会话去登录是未定义行为。
     pub async fn login(&self) -> Result<String, LoginError> {
-        let (url, credentials) = {
+        let (url, base_url, credentials) = {
             let guard = self.session.read().await;
             let device = guard.as_ref().ok_or(LoginError::NoDevice)?;
             let url = format!("{}/ubus", device.base_url.trim_end_matches('/'));
             let credentials = (device.username.clone(), device.password.clone());
-            (url, credentials)
+            (url, device.base_url.clone(), credentials)
         };
         let (username, password) = credentials;
         let payload = self
@@ -90,7 +90,7 @@ impl RouterClient {
                 LoginError::InvalidResponse("login ok but no ubus_rpc_session".into())
             })?
             .to_string();
-        self.update_session_id(&session).await;
+        self.update_session_id(&base_url, &session).await;
         Ok(session)
     }
 
@@ -115,8 +115,16 @@ impl RouterClient {
 
     /// 重连：探活当前会话，失败则静默重登。
     /// 成功返回有效 session id；全部失败返回最后的登录错误。
+    /// 未登录（session=None）直接走 login：probe 以 EMPTY_SESSION 发起，个别 ACL
+    /// 配置会对未认证放行 system.board——那时全 0 临时会话会被误当有效会话返回
     pub async fn reconnect(&self) -> Result<String, LoginError> {
-        if self.probe().await.is_ok() {
+        let logged_in = self
+            .session
+            .read()
+            .await
+            .as_ref()
+            .is_some_and(|d| d.session.is_some());
+        if logged_in && self.probe().await.is_ok() {
             return Ok(self.current_session_id().await);
         }
         self.login().await

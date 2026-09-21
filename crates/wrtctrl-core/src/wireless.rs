@@ -15,22 +15,6 @@ use crate::uci::{UciSection, UCI_CALL_TIMEOUT};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-/// wifi-device.type 双分支：mtwifi/mtk/mtkwifi → MTK，其余 mac80211
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Branch {
-    Mtk,
-    #[serde(rename = "mac80211")]
-    Mac80211,
-}
-
-pub fn detect_branch(radio_type: &str) -> Branch {
-    match radio_type {
-        "mtwifi" | "mtk" | "mtkwifi" => Branch::Mtk,
-        _ => Branch::Mac80211,
-    }
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct RadioStatus {
     pub section: UciSection,
@@ -149,17 +133,31 @@ impl RouterClient {
             .call_ubus("iwinfo", "assoclist", json!({"device": ifname}), UCI_CALL_TIMEOUT)
             .await
         {
-            Ok(res) => res.get("results").cloned().unwrap_or(json!([])),
+            // results 显式为 null 时同样回落空数组（unwrap_or 只兜键缺失，不兜 null 值）
+            Ok(res) => res
+                .get("results")
+                .and_then(|v| v.as_array())
+                .map(|a| json!(a))
+                .unwrap_or(json!([])),
             Err(_) => json!([]),
         }
     }
 
     /// radio 启停：device 与其下所有 wifi-iface 的 disabled 同步（OR 关系，见模块注释）
-    /// + commit{rollback}；enable 时 /sbin/wifi up 兜底立即 up（失败忽略）。
+    /// + commit{rollback}；enable 时 /sbin/wifi up 兜底立即 up。
     /// uci.get 失败时中止而非半写（否则只写 radio、
-    /// 不知道 iface 列表——enable 场景恰好触发注释里"残留 disabled 导致没真正开启"的 bug）
+    /// 不知道 iface 列表——enable 场景恰好触发注释里"残留 disabled 导致没真正开启"的 bug）；
+    /// radio 名先本地校验存在性（手里已有 sections），拼错名不再发往 rpcd
     pub async fn set_radio_enabled(&self, radio_name: &str, enabled: bool) -> Result<(), UbusError> {
         let sections = self.uci_get("wireless").await?;
+        if !sections
+            .values()
+            .any(|s| s.section_type == "wifi-device" && s.name == radio_name)
+        {
+            return Err(UbusError::InvalidArgument(format!(
+                "unknown radio: {radio_name}"
+            )));
+        }
         let val = if enabled { "0" } else { "1" };
         let mut iface_names: Vec<String> = sections
             .values()
@@ -178,14 +176,19 @@ impl RouterClient {
         }
         self.uci_commit("wireless").await?;
         if enabled {
-            let _ = self
+            // wifi up 失败不再零痕迹：stderr/stderr 链进 stderr（Android 侧 best-effort
+            // 进 logcat），实测「开了但没起来」至少有排查线索
+            if let Err(e) = self
                 .call_ubus(
                     "file",
                     "exec",
                     json!({"command": "/sbin/wifi", "params": ["up", radio_name]}),
                     UCI_CALL_TIMEOUT,
                 )
-                .await;
+                .await
+            {
+                eprintln!("wrtctrl: wifi up {radio_name} failed: {e}");
+            }
         }
         Ok(())
     }
@@ -205,15 +208,6 @@ impl RouterClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn branch_detection() {
-        assert_eq!(detect_branch("mtwifi"), Branch::Mtk);
-        assert_eq!(detect_branch("mtk"), Branch::Mtk);
-        assert_eq!(detect_branch("mtkwifi"), Branch::Mtk);
-        assert_eq!(detect_branch("mac80211"), Branch::Mac80211);
-        assert_eq!(detect_branch(""), Branch::Mac80211);
-    }
 
     #[test]
     fn to_array_semantics() {

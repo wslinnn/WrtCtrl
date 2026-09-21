@@ -108,7 +108,7 @@ async fn diag_rejects_bad_hosts_locally() {
 
 // ── syslog ──
 
-/// 契约：read_syslog 走 wrapper、行分类、截尾 800 行
+/// 契约：read_syslog 走 wrapper、行分类（不截断）
 #[tokio::test]
 async fn syslog_reads_and_classifies() {
     let server = MockServer::start().await;

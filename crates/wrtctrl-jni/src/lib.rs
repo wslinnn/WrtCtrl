@@ -56,7 +56,9 @@ fn runtime() -> &'static Runtime {
     })
 }
 
-/// 全局唯一客户端（自签 HTTPS 放行 = 旧行为；no_proxy 直连）
+/// 全局唯一客户端。初始 accept_invalid_certs=true 仅为占位——首个 setDevice 的
+/// set_session 会按设备 baseUrl scheme 派生 TLS 策略重建会话客户端
+/// （自签 HTTPS 放行 = 旧行为；no_proxy 直连；重定向禁用见 core build_http）
 fn client() -> &'static Arc<RouterClient> {
     CLIENT.get_or_init(|| Arc::new(RouterClient::new(true)))
 }
@@ -142,10 +144,13 @@ fn respond<T: Serialize>(env: &mut JNIEnv, result: Result<T, UbusError>) -> jstr
 }
 
 fn respond_err(env: &mut JNIEnv, code: &str, message: &str) -> jstring {
-    respond(
-        env,
-        Err::<Value, _>(UbusError::InvalidResponse(format!("{code}: {message}"))),
-    )
+    // 直接构造信封而不是经 UbusError 归一——panic 等边界错误必须保留独立 code
+    // （压平成 invalid_response 会迫使 Kotlin 侧字符串前缀嗅探，正是 error.rs
+    // 评审收敛要消灭的模式）
+    let value = json!({"ok": false, "error": {"code": code, "message": message}});
+    env.new_string(value.to_string())
+        .map(|s| s.into_raw())
+        .unwrap_or(std::ptr::null_mut())
 }
 
 /// 统一导出样板：panic 防线 + block_on + 应答信封。
@@ -184,8 +189,15 @@ macro_rules! guarded_login {
     }};
 }
 
-fn millis(ms: jint) -> Duration {
-    Duration::from_millis(ms.max(0) as u64)
+/// 超时入参校验：0/负数会构成立即触发的 timeout（无意义 Timeout 错误），
+/// 与 Kotlin 侧「未传」语义混淆——显式拒绝而非静默钳位
+fn millis(ms: jint) -> Result<Duration, UbusError> {
+    if ms <= 0 {
+        return Err(UbusError::InvalidArgument(
+            "timeout_ms must be positive".into(),
+        ));
+    }
+    Ok(Duration::from_millis(ms as u64))
 }
 
 // ── 导出 ──
@@ -207,10 +219,14 @@ pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_panicTestNative(
     init_panic_hook();
     let text = match catch_unwind(AssertUnwindSafe(wrtctrl_core::panic_drill)) {
         Ok(_) => "UNEXPECTED: panic_drill did not panic".to_string(),
-        Err(payload) => match payload.downcast_ref::<&str>() {
-            Some(m) => format!("caught panic: {m}"),
-            None => "caught panic: <non-str payload>".to_string(),
-        },
+        Err(payload) => {
+            let msg = payload
+                .downcast_ref::<&str>()
+                .map(|m| m.to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "<non-str payload>".to_string());
+            format!("caught panic: {msg}")
+        }
     };
     env.new_string(text)
         .map(|s| s.into_raw())
@@ -248,7 +264,8 @@ pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_setDeviceNative(
             password: get_str("password"),
         };
         client().set_session(Some(session)).await;
-        Ok(json!({"ok": true}))
+        // 信封统一为 data:null（此前 data={"ok":true} 与外层 ok 双层重复且无消费者）
+        Ok(())
     })
 }
 
@@ -292,7 +309,7 @@ pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_callUbusNative(
     guarded!(env, async move {
         let params = parse_json(&params_json)?;
         client()
-            .call_ubus(&object, &method, params, millis(timeout_ms))
+            .call_ubus(&object, &method, params, millis(timeout_ms)?)
             .await
     })
 }
@@ -361,8 +378,12 @@ pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_uciOrderNative(
             .as_array()
             .ok_or(UbusError::InvalidArgument("sections must be an array".into()))?
             .iter()
-            .filter_map(|v| v.as_str().map(str::to_string))
-            .collect();
+            .map(|v| {
+                v.as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| UbusError::InvalidArgument("sections must be strings".into()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         client().uci_order(&config, &sections).await
     })
 }
@@ -433,10 +454,14 @@ pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_writeFileNative(
 ) -> jstring {
     let (path, data, mode) = (jstr(&mut env, &path), jstr(&mut env, &data), jstr(&mut env, &mode));
     guarded!(env, async move {
+        // mode 空串 = 不携带（合法）；非空但解析失败显式报错——十进制契约
+        // （core 集成测试锚定 420=0644），静默丢弃会让 chmod 请求无痕迹失效
         let mode = if mode.is_empty() {
             None
         } else {
-            mode.parse::<u32>().ok()
+            Some(mode.parse::<u32>().map_err(|_| {
+                UbusError::InvalidArgument(format!("bad mode: {mode} (decimal expected)"))
+            })?)
         };
         client().write_file(&path, &data, mode).await
     })
@@ -496,7 +521,16 @@ pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_restartRadioNative(
     radio_name: JString,
 ) -> jstring {
     let radio_name = jstr(&mut env, &radio_name);
-    guarded!(env, async move { client().restart_radio(&radio_name).await })
+    guarded!(env, async move {
+        // 归一为 {code,stdout,stderr}（对齐三个 diag 导出的 exec_result_json 形状），
+        // 不再原样透传 file.exec 载荷（同类操作两种信封形状）
+        let payload = client().restart_radio(&radio_name).await?;
+        Ok(json!({
+            "code": payload.get("code").cloned().unwrap_or(Value::Null),
+            "stdout": payload.get("stdout").cloned().unwrap_or(Value::Null),
+            "stderr": payload.get("stderr").cloned().unwrap_or(Value::Null),
+        }))
+    })
 }
 
 /// 探活任意设备（设备列表并行 ping；当前设备同经此以 baseUrl 发起）→ {"ms": 123} 或 {"ms": null}

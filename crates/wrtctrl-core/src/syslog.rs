@@ -6,7 +6,6 @@
 //! - dmesg 走 /bin/dmesg -r（ACL 授予 "/bin/dmesg -r"）
 //! - 不在 app 端截断：
 //!   日志淘汰由路由器 logd 环形缓冲区自身负责，wrapper 返回什么就展示什么
-//! - dmesg 走 /bin/dmesg -r（ACL 授予 "/bin/dmesg -r"）
 
 use crate::error::UbusError;
 use crate::rpc::RouterClient;

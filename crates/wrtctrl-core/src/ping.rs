@@ -1,34 +1,20 @@
-//! ping.rs — 设备探活（对应旧 DeviceManager.pingDevice/pingLevel）。
+//! ping.rs — 设备探活。
 //!
 //! 优先 ICMP（/system/bin/ping，rtt 真实）；实测表明部分 ROM
 //! 限制 app 执行该二进制（路径/cap_net_raw/SELinux），故 ICMP 失败回落 HTTP HEAD
 //! （收到任意响应即可达，数值含握手开销偏大，仅作保底）。
+//! 延迟分档（<100/<300）由 Kotlin 侧呈现层实现——分档纯 UI 语义，不跨 FFI。
 
 use crate::rpc::RouterClient;
-use serde::Serialize;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
 const PING_TIMEOUT: Duration = Duration::from_secs(5);
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum PingLevel {
-    Fast,
-    Ok,
-    Slow,
-}
-
-/// ms → 延迟档位：<100 fast / <300 ok / ≥300 slow（None=offline，与 LuCI 同款分档）
-pub fn ping_level(ms: u64) -> PingLevel {
-    if ms < 100 {
-        PingLevel::Fast
-    } else if ms < 300 {
-        PingLevel::Ok
-    } else {
-        PingLevel::Slow
-    }
-}
+/// ICMP 子进程整体硬超时：`-W 2` 只约束单包等待，域名解析与个别 ROM 的
+/// 异常 ping 不受其控——无兜底时 spawn_blocking 线程可被无限占用（阻塞
+/// JNI 调用线程）。超时后子进程成为孤儿由其自身退出释放，本调用按不可达处理
+const ICMP_PING_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl RouterClient {
     /// 探活任意设备根 URL（设备列表页并行 ping 多台用；当前设备探活同样
@@ -54,19 +40,21 @@ fn host_of(base_url: &str) -> Option<String> {
     (!host.is_empty()).then(|| host.to_string())
 }
 
-/// ICMP 探活：ping -c1 -W2（阻塞执行放 spawn_blocking，rtt 从输出解析）。
+/// ICMP 探活：ping -c1 -W2，整体套 10s 硬超时（阻塞执行放 spawn_blocking，rtt 从输出解析）。
 /// 不写死绝对路径、按 PATH 解析：部分 ROM 的 ping 不在 /system/bin（写死会导致恒失败）。
 async fn icmp_ping(host: &str) -> Option<u64> {
     let host = host.to_string();
     let start = Instant::now();
-    let output = tokio::task::spawn_blocking(move || {
-        Command::new("ping")
-            .args(["-c", "1", "-W", "2", &host])
-            .output()
-            .ok()
-    })
-    .await
-    .ok()??;
+    let joined =
+        tokio::time::timeout(ICMP_PING_TIMEOUT, tokio::task::spawn_blocking(move || {
+            Command::new("ping")
+                .args(["-c", "1", "-W", "2", &host])
+                .output()
+                .ok()
+        }))
+        .await;
+    // 硬超时 / JoinError / 进程启动失败：一律按不可达处理（孤儿子进程自行退出释放线程）
+    let output = joined.ok()?.ok()??;
     if !output.status.success() {
         return None;
     }
@@ -91,16 +79,6 @@ async fn http_probe(client: &RouterClient, base_url: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn level_boundaries() {
-        assert_eq!(ping_level(0), PingLevel::Fast);
-        assert_eq!(ping_level(99), PingLevel::Fast);
-        assert_eq!(ping_level(100), PingLevel::Ok);
-        assert_eq!(ping_level(299), PingLevel::Ok);
-        assert_eq!(ping_level(300), PingLevel::Slow);
-        assert_eq!(ping_level(5000), PingLevel::Slow);
-    }
 
     #[test]
     fn host_extraction() {

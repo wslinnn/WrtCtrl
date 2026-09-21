@@ -12,6 +12,14 @@
 //!   为该 config 全部 section 名按目标顺序全量列出
 //! - get 解包 .values：rpcd 返回 {values:{sections...}}，每个 section 带元数据键
 //!   .type/.anonymous/.name
+//!
+//! 已知风险窗口（uci 模型固有）：
+//! - staging 残留：多步写序列（add→set→commit）在 commit 前任一步失败，已落
+//!   staging 的半成品会残留，此后任何一次不相关 apply 都会将其冲上线（uci apply
+//!   提交全部 pending，config 参数不隔离）。重试路径（set 幂等 + 重新 commit）可自愈
+//! - 确定性序依赖：serde_json 默认 Map=BTreeMap（未开 preserve_order feature）+
+//!   本文件 BTreeMap。谁给 serde_json 加了 preserve_order，UI 列表序即变为
+//!   服务器返回序（仍确定但会变）
 
 use crate::error::UbusError;
 use crate::rpc::RouterClient;
@@ -83,13 +91,18 @@ impl RouterClient {
                 UCI_CALL_TIMEOUT,
             )
             .await?;
-        // `res.section || res` 的兜底是死分支噪音，Rust 侧显式报错
+        // 
+        // 载荷截断进错误信息（可能是整段响应，塞满 logcat 无意义）
         payload
             .get("section")
             .and_then(|v| v.as_str())
             .map(str::to_string)
             .ok_or_else(|| {
-                UbusError::InvalidResponse(format!("uci.add response missing section: {payload}"))
+                let full = payload.to_string();
+                let short: String = full.chars().take(200).collect();
+                UbusError::InvalidResponse(format!(
+                    "uci.add response missing section: {short}"
+                ))
             })
     }
 
@@ -145,7 +158,10 @@ impl RouterClient {
     /// 安全提交——UCI 写路径的唯一出口：
     /// 保存前 session 预检（失效自动重登，防 apply 成功但 confirm 过期失败 →
     /// 被 120s 回滚）→ apply{rollback:true, timeout:120} → confirm。
+    /// 全程持 commit_lock 串行化：rpcd 的 rollback/confirm 是全局单槽，并发 commit
+    /// 的 confirm 可能交错消耗、令其中一方被静默回滚（见模块头已知风险窗口）
     pub async fn uci_commit(&self, config: &str) -> Result<(), UbusError> {
+        let _serial = self.commit_lock.lock().await;
         self.ensure_session().await?;
         self.call_ubus(
             "uci",
@@ -159,7 +175,8 @@ impl RouterClient {
         Ok(())
     }
 
-    /// 便捷：set + commit
+    /// 便捷：set + commit。仅供集成测试锚定「set→commit」契约——app 运行路径走
+    /// 分离导出（Kotlin 侧 add/set/commit 自编排），两套编排不可混用语义假设
     pub async fn uci_set_commit(
         &self,
         config: &str,
@@ -170,7 +187,7 @@ impl RouterClient {
         self.uci_commit(config).await
     }
 
-    /// 便捷：add + set（有值时）+ commit，返回新 section 名
+    /// 便捷：add + set（有值时）+ commit，返回新 section 名。契约锚定用途同上
     pub async fn uci_add_commit(
         &self,
         config: &str,
@@ -185,7 +202,7 @@ impl RouterClient {
         Ok(name)
     }
 
-    /// 便捷：delete + commit
+    /// 便捷：delete + commit。契约锚定用途同上
     pub async fn uci_delete_commit(&self, config: &str, section: &str) -> Result<(), UbusError> {
         self.uci_delete(config, section).await?;
         self.uci_commit(config).await

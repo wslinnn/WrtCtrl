@@ -16,7 +16,6 @@ pub mod uci;
 pub mod wireless;
 
 pub use error::UbusError;
-pub use ping::{ping_level, PingLevel};
 pub use rpc::{DeviceSession, RouterClient, EMPTY_SESSION};
 pub use syslog::LogLevel;
 
