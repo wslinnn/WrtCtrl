@@ -52,6 +52,31 @@
     <string name="client_no_leases">No leases</string>
     <string name="client_leases_loading">Loading leases…</string>
     <string name="client_no_hostname">Unknown host</string>
+    <!-- Client block (firewall channel; scope spelled out in body, write requires confirm) -->
+    <string name="client_block_action">Block this device</string>
+    <string name="client_unblock_action">Unblock</string>
+    <string name="client_blocked">Blocked</string>
+    <string name="client_block_confirm_title">Block %1$s?</string>
+    <string name="client_unblock_confirm_title">Unblock %1$s?</string>
+    <string name="client_block_confirm_ok">Block</string>
+    <string name="client_unblock_confirm_ok">Unblock</string>
+    <string name="client_block_confirm_body">Adds a firewall rule that denies this device internet access (LAN→WAN). LAN access between devices is unaffected. Takes effect immediately and can be undone on this page at any time.</string>
+    <string name="client_unblock_confirm_body">Removes the firewall rule and restores this device\'s internet access, effective immediately.</string>
+    <string name="client_block_failed">Failed to write the rule, please retry</string>
+    <!-- Blocked section: all firewall block_ rules, unblock entry independent of device presence -->
+    <string name="client_blocked_section">Blocked</string>
+    <!-- Static lease one-tap bind/unbind; renewal semantics in body -->
+    <string name="client_static_action">Set static lease · %1$s</string>
+    <string name="client_unstatic_action">Remove static lease</string>
+    <string name="client_static_section">Static leases</string>
+    <string name="client_static_bind_ip">Bound to %1$s</string>
+    <string name="client_static_confirm_title">Set a static lease?</string>
+    <string name="client_static_confirm_body">Assigns %1$s permanently to this device (DHCP static lease). The rule takes effect immediately; the device switches to this IP at its next renewal or reconnect.</string>
+    <string name="client_static_confirm_ok">Set static</string>
+    <string name="client_unstatic_confirm_title">Remove the static lease?</string>
+    <string name="client_unstatic_confirm_body">Deletes the IP binding for this device and restores dynamic assignment, effective immediately.</string>
+    <string name="client_unstatic_confirm_ok">Unbind</string>
+    <string name="client_static_failed">Failed to write the static lease, please retry</string>
     <!-- UI revamp P2: network (three-layer cards; "carries" phrasing per glossary) -->
     <string name="network_sys_devices">System devices</string>
     <string name="network_not_connected">Not connected</string>

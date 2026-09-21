@@ -54,6 +54,31 @@
     <string name="client_no_leases">暂无租约</string>
     <string name="client_leases_loading">正在加载租约…</string>
     <string name="client_no_hostname">未知主机</string>
+    <!-- 客户端拉黑（防火墙通道；作用范围写进正文，安全写路径须确认） -->
+    <string name="client_block_action">拉黑此设备</string>
+    <string name="client_unblock_action">解除拉黑</string>
+    <string name="client_blocked">已拉黑</string>
+    <string name="client_block_confirm_title">拉黑 %1$s？</string>
+    <string name="client_unblock_confirm_title">解除拉黑 %1$s？</string>
+    <string name="client_block_confirm_ok">拉黑</string>
+    <string name="client_unblock_confirm_ok">解除</string>
+    <string name="client_block_confirm_body">将新增防火墙规则禁止该设备访问外网（LAN→WAN），局域网内互访不受影响。规则即时生效，可随时在本页解除。</string>
+    <string name="client_unblock_confirm_body">将删除防火墙规则，恢复该设备的外网访问，即时生效。</string>
+    <string name="client_block_failed">规则写入失败，请重试</string>
+    <!-- 已封禁区块：firewall block_ 规则全量呈现，解除入口不依赖设备在线 -->
+    <string name="client_blocked_section">已封禁</string>
+    <!-- 静态租约一键绑定/取消；生效语义写进正文 -->
+    <string name="client_static_action">设为静态租约 · %1$s</string>
+    <string name="client_unstatic_action">取消静态租约</string>
+    <string name="client_static_section">静态租约</string>
+    <string name="client_static_bind_ip">绑定 %1$s</string>
+    <string name="client_static_confirm_title">设为静态租约？</string>
+    <string name="client_static_confirm_body">将把 %1$s 固定分配给该设备（DHCP 静态租约）。写入即时生效，设备在下次续租或重连时切换到该 IP。</string>
+    <string name="client_static_confirm_ok">设为静态</string>
+    <string name="client_unstatic_confirm_title">取消静态租约？</string>
+    <string name="client_unstatic_confirm_body">将删除该设备的 IP 绑定，恢复动态分配，即时生效。</string>
+    <string name="client_unstatic_confirm_ok">取消绑定</string>
+    <string name="client_static_failed">静态租约写入失败，请重试</string>
     <!-- UI 改版 P2：网络页（三层结构 + 承载句式见规约 11） -->
     <string name="network_sys_devices">系统设备</string>
     <string name="network_not_connected">未连接</string>

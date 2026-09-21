@@ -39,11 +39,18 @@ data class DhcpLease(
     val expires: Long,
 )
 
+/** 静态租约条目（uci dhcp @host 全量）：section 为删除主键；name/ip 可空（数据有源，缺失不猜）。
+ *  mac 大写域（isStatic 判定口径；区别于 blockedMacs 的小写域） */
+data class StaticHost(val section: String, val mac: String, val name: String?, val ip: String?)
+
 /**
  * 客户端页纯解析：JSONObject/JSONArray 进、结构化模型出，
  * JVM 单测覆盖；失败一律空/默认值（ 静默空态）。
  */
 internal object ClientParsers {
+
+    /** 拉黑规则的 uci name 前缀（写入与识别共用，见 blockedMacs） */
+    const val BLOCK_RULE_PREFIX = "block_"
 
     /** 无线接口清单：getWirelessDevices（名称键控根对象）→ (ifname, band 大写或 null) 列表 */
     fun wifiIfaces(payload: JSONObject): List<Pair<String, String?>> {
@@ -98,17 +105,48 @@ internal object ClientParsers {
         return map
     }
 
-    /** 静态租约 MAC 集合（WrtCore.uciGet 类型化 section 表：section_type = host，MAC 在 options.mac） */
-    fun staticHostMacs(uciDhcp: JSONObject): Set<String> {
-        val macs = mutableSetOf<String>()
-        for (key in uciDhcp.keys()) {
-            val section = uciDhcp.optJSONObject(key) ?: continue
-            if (section.optString("section_type") != "host") continue
-            section.optJSONObject("options")?.optString("mac")
-                ?.uppercase()?.takeIf(String::isNotBlank)?.let { macs.add(it) }
-        }
-        return macs
-    }
+    /** 静态租约全量（WrtCore.uciGet("dhcp") 类型化 section 表）：isStatic 判定、名称反查、
+     *  「静态租约」组展示与删除（section 主键）同源于此列表；按 MAC 排序保证确定性 */
+    fun staticHosts(uciDhcp: JSONObject): List<StaticHost> =
+        uciDhcp.keys().asSequence()
+            .mapNotNull { key -> uciDhcp.optJSONObject(key)?.let { key to it } }
+            .filter { (_, section) -> section.optString("section_type") == "host" }
+            .mapNotNull { (key, section) ->
+                val options = section.optJSONObject("options") ?: return@mapNotNull null
+                val mac = options.optString("mac").uppercase().takeIf(String::isNotBlank) ?: return@mapNotNull null
+                StaticHost(
+                    section = key,
+                    mac = mac,
+                    name = options.optString("name").takeIf(String::isNotBlank),
+                    ip = options.optString("ip").takeIf(String::isNotBlank),
+                )
+            }
+            .sortedBy { it.mac }
+            .toList()
+
+    /**
+     * 拉黑规则集合（WrtCore.uciGet("firewall") 类型化 section 表）：归一化 MAC（小写）→
+     * uci section 名（解除需按名删除）。识别约定 = name 以 [BLOCK_RULE_PREFIX] 开头
+     * （本 app 写入的命名，用户手写规则无此前缀不会被误读/误删）；src_mac 兼容
+     * string 与 list 两种 uci 形态。
+     */
+    fun blockedMacs(uciFirewall: JSONObject): Map<String, String> =
+        uciFirewall.keys().asSequence()
+            .mapNotNull { key -> uciFirewall.optJSONObject(key)?.let { key to it } }
+            .filter { (_, section) -> section.optString("section_type") == "rule" }
+            .mapNotNull { (key, section) ->
+                val options = section.optJSONObject("options") ?: return@mapNotNull null
+                if (!options.optString("name").startsWith(BLOCK_RULE_PREFIX)) return@mapNotNull null
+                key to blockedMacsOf(options)
+            }
+            .flatMap { (key, macs) -> macs.map { mac -> mac.lowercase() to key } }
+            .toMap()
+
+    /** options 里的 src_mac：uci list（数组）逐个收录，否则按单值 string */
+    private fun blockedMacsOf(options: JSONObject): List<String> =
+        options.optJSONArray("src_mac")?.let { arr ->
+            (0 until arr.length()).mapNotNull { arr.optString(it).takeIf(String::isNotBlank) }
+        } ?: listOfNotNull(options.optString("src_mac").takeIf(String::isNotBlank))
 
     /** getDHCPLeases → (v4, v6) 两个租约列表 */
     fun dhcpLeases(payload: JSONObject): Pair<List<DhcpLease>, List<DhcpLease>> {

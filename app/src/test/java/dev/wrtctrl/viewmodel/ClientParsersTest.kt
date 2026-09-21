@@ -96,7 +96,44 @@ class ClientParsersTest {
               "options":{"dhcp_option":"42"}}}
             """.trimIndent(),
         )
-        assertEquals(setOf("AA:BB:CC:00:00:01"), ClientParsers.staticHostMacs(uci))
+        assertEquals(
+            listOf(StaticHost("@host[0]", "AA:BB:CC:00:00:01", "printer", "192.168.2.50")),
+            ClientParsers.staticHosts(uci),
+        )
+    }
+
+    @Test
+    fun `拉黑规则解析——block_ 前缀命中、非前缀忽略、mac 小写归一`() {
+        val uci = JSONObject(
+            """
+            {"cfg044a3c":{"name":"cfg044a3c","section_type":"rule","anonymous":true,
+              "options":{"name":"block_aa:bb:cc:dd:ee:ff","src":"lan","dest":"wan",
+                         "src_mac":"AA:BB:CC:DD:EE:FF","proto":"all","target":"REJECT"}},
+             "cfg055b4d":{"name":"cfg055b4d","section_type":"rule","anonymous":true,
+              "options":{"name":"allow_guest","src":"lan","dest":"wan","src_mac":"11:22:33:44:55:66"}},
+             "cfg066c5e":{"name":"cfg066c5e","section_type":"rule","anonymous":true,
+              "options":{"name":"block_00:11:22:33:44:55","src":"wan","dest":"lan"}},
+             "defaults":{"name":"defaults","section_type":"defaults","anonymous":false,
+              "options":{"input":"ACCEPT"}}}
+            """.trimIndent(),
+        )
+        val blocked = ClientParsers.blockedMacs(uci)
+        assertEquals(mapOf("aa:bb:cc:dd:ee:ff" to "cfg044a3c"), blocked)
+    }
+
+    @Test
+    fun `拉黑规则解析——src_mac 为 uci list 数组形态时逐个收录`() {
+        val uci = JSONObject(
+            """
+            {"cfg077d6f":{"name":"cfg077d6f","section_type":"rule","anonymous":true,
+              "options":{"name":"block_list","src":"lan","dest":"wan",
+                         "src_mac":["AA:BB:CC:00:00:01","AA:BB:CC:00:00:02"],"target":"DROP"}}}
+            """.trimIndent(),
+        )
+        assertEquals(
+            mapOf("aa:bb:cc:00:00:01" to "cfg077d6f", "aa:bb:cc:00:00:02" to "cfg077d6f"),
+            ClientParsers.blockedMacs(uci),
+        )
     }
 
     @Test

@@ -126,8 +126,10 @@ object WrtCore {
 
     suspend fun uciGet(config: String): JSONObject = dataObject { uciGetNative(config) }
 
+    // uci_add 的 Rust 返回是裸 String（信封 data 直接是 section 名），必须用 dataString 取——
+    // dataObject 对字符串必抛（拉黑功能首个消费者触雷，2026-09-21 与 LuCI 行为一致确诊）
     suspend fun uciAdd(config: String, sectionType: String): String =
-        dataObject { uciAddNative(config, sectionType) }.getString("section")
+        dataString { uciAddNative(config, sectionType) }
 
     suspend fun uciSet(config: String, section: String, values: JSONObject) {
         call { uciSetNative(config, section, values.toString()) }

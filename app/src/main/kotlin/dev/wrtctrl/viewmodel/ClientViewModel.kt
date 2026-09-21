@@ -4,6 +4,7 @@ import android.app.Application
 import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.wrtctrl.R
 import dev.wrtctrl.bridge.WrtCore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -26,14 +27,20 @@ data class ClientUiState(
     val wirelessClients: List<WifiClient> = emptyList(),
     val dhcpv4: List<DhcpLease> = emptyList(),
     val dhcpv6: List<DhcpLease> = emptyList(),
-    /** uci dhcp @host 静态租约 MAC 大写集合（拉取失败 = 空集，行全部按动态呈现） */
-    val staticMacs: Set<String> = emptySet(),
+    /** uci dhcp @host 静态租约全量（拉取失败 = 空表，行全部按动态呈现） */
+    val staticHosts: List<StaticHost> = emptyList(),
     /** 无线拉取最近一次失败（列表为空时以失败文案区分「没有客户端」） */
     val loadFailed: Boolean = false,
     /** 租约首拉已落地（成功与否都算拉过；静默刷新失败不清此标志，保留旧值不闪态） */
     val leasesLoaded: Boolean = false,
     /** 租约首拉失败（仅在未落地时有意义：区分「暂无租约」与「加载失败」） */
     val leasesFailed: Boolean = false,
+    /** 拉黑规则：归一化 MAC（小写）→ uci section 名（来源 = firewall 配置真实规则） */
+    val blockedMacs: Map<String, String> = emptyMap(),
+    /** 写操作进行中的 MAC（小写域；同一 MAC 的写动作互斥——动作行转圈禁点） */
+    val busyMac: String? = null,
+    /** 写失败分类文案（一次性事件，Screen 呈现后 consumeWriteError 清除） */
+    val writeError: String? = null,
 )
 
 /**
@@ -44,13 +51,17 @@ data class ClientUiState(
  * 静态租约表（uci get dhcp）拉一次缓存，失败下次重试；拉取失败静默保留旧值；
  * 切设备整页失效+ generation 守卫丢弃在飞的旧设备响应（含旧设备租约污染新设备缓存）。
  */
+// TooManyFunctions：动作集 = 读（无线/租约/静态/拉黑四源）+ 写（拉黑/静态两对），函数数由
+// 功能面决定，拆 VM 只会制造跨类状态同步
+@Suppress("TooManyFunctions")
 class ClientViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(ClientUiState())
     val state: StateFlow<ClientUiState> = _state
 
     private var loadedDeviceId: String? = null
     private var dhcpCache: Pair<List<DhcpLease>, List<DhcpLease>>? = null
-    private var staticMacsCache: Set<String>? = null
+    private var staticHostsCache: List<StaticHost>? = null
+    private var blockedCache: Map<String, String>? = null
 
     /** 设备代次（reqSeq 守卫）：切设备 +1，在飞响应按代次丢弃 */
     private var generation = 0
@@ -76,13 +87,14 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** 设备切换失效（含 DHCP/静态租约缓存）并重拉 */
+    /** 设备切换失效（含 DHCP/静态租约/拉黑缓存）并重拉 */
     fun ensureLoaded(deviceId: String?) {
         if (deviceId != loadedDeviceId) {
             loadedDeviceId = deviceId
             generation++
             dhcpCache = null
-            staticMacsCache = null
+            staticHostsCache = null
+            blockedCache = null
             _state.update { ClientUiState() }
             loadWireless()
         }
@@ -104,6 +116,7 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
         val radios = ubusSafe("luci-rpc", "getWirelessDevices")
         val dhcp = ensureDhcp(gen)
         val statics = ensureStatic(gen)
+        val blocked = ensureBlocked(gen)
         // 失败时 hostname/IP 合并退化为无合并（无线列表本身仍可展示）
         val hostnames = dhcp?.let { (v4, v6) -> ClientParsers.hostnameMap(v4, v6) } ?: emptyMap()
         val ips = dhcp?.let { (v4, _) -> ClientParsers.ipMap(v4) } ?: emptyMap()
@@ -120,7 +133,8 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
                 wirelessClients = clients,
                 dhcpv4 = dhcp?.first ?: it.dhcpv4,
                 dhcpv6 = dhcp?.second ?: it.dhcpv6,
-                staticMacs = statics ?: it.staticMacs,
+                staticHosts = statics ?: it.staticHosts,
+                blockedMacs = blocked ?: it.blockedMacs,
                 loadFailed = radios == null,
                 leasesLoaded = dhcp != null || it.leasesLoaded,
                 leasesFailed = dhcp == null && !it.leasesLoaded,
@@ -135,7 +149,7 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
             _state.update { it.copy(refreshing = true) }
             val startedAt = SystemClock.elapsedRealtime()
             dhcpCache = null
-            staticMacsCache = null
+            staticHostsCache = null
             loadWirelessNow(showLoading = false)
             refreshDhcp()
             holdRefreshSpin(startedAt)
@@ -175,10 +189,10 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
         return pair
     }
 
-    /** 静态租约 MAC 集合（WrtCore.uciGet 专用通道；拉一次缓存；失败返回 null 不缓存——
+    /** 静态租约表（WrtCore.uciGet 专用通道；拉一次缓存；失败返回 null 不缓存——
      *  下次轮询重试，不误标全部动态） */
-    private suspend fun ensureStatic(gen: Int): Set<String>? {
-        staticMacsCache?.let { return it }
+    private suspend fun ensureStatic(gen: Int): List<StaticHost>? {
+        staticHostsCache?.let { return it }
         val uciDhcp = try {
             WrtCore.uciGet("dhcp")
         } catch (e: CancellationException) {
@@ -187,16 +201,195 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
             android.util.Log.w("wrtctrl", "static dhcp hosts load failed: ${e.message}")
             return null
         }
-        val macs = try {
-            ClientParsers.staticHostMacs(uciDhcp)
+        val hosts = try {
+            ClientParsers.staticHosts(uciDhcp)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             android.util.Log.w("wrtctrl", "static dhcp hosts parse failed: ${e.message}")
             return null
         }
-        if (gen == generation) staticMacsCache = macs
+        if (gen == generation) staticHostsCache = hosts
+        return hosts
+    }
+
+    /** 拉黑规则集合（WrtCore.uciGet("firewall") 专用通道；拉一次缓存；失败返回 null 不缓存——
+     *  下次轮询重试，静默；写操作成功后主动失效缓存，下一拍对账设备端真实规则） */
+    private suspend fun ensureBlocked(gen: Int): Map<String, String>? {
+        blockedCache?.let { return it }
+        val uciFirewall = try {
+            WrtCore.uciGet("firewall")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w("wrtctrl", "firewall config load failed: ${e.message}")
+            return null
+        }
+        val macs = try {
+            ClientParsers.blockedMacs(uciFirewall)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w("wrtctrl", "firewall config parse failed: ${e.message}")
+            return null
+        }
+        if (gen == generation) blockedCache = macs
         return macs
+    }
+
+    /** 写成功收尾：本地即时更新（不等下拍轮询）+ busy 清除；gen 失配只清 busy（防旧设备操作污染新设备界面） */
+    private fun finishWrite(gen: Int, transform: (ClientUiState) -> ClientUiState) {
+        _state.update { current ->
+            (if (gen == generation) transform(current) else current).copy(busyMac = null)
+        }
+    }
+
+    /** 写失败收尾：双缓存失效（下拍对账设备端真实状态）+ busy 清除 + 分类文案（原始链已进 logcat） */
+    private fun writeFailed(gen: Int, e: Exception, textRes: Int) {
+        android.util.Log.w("wrtctrl", "write failed: ${e.message}")
+        staticHostsCache = null
+        blockedCache = null
+        _state.update {
+            it.copy(
+                busyMac = null,
+                writeError = if (gen == generation) getApplication<Application>().getString(textRes) else null,
+            )
+        }
+    }
+
+    private fun writeErrorText(textRes: Int): String = getApplication<Application>().getString(textRes)
+
+    /**
+     * 拉黑 / 解除拉黑（防重复提交）：
+     * 拉黑 = uciAdd → uciSet（name=block_<mac小写>，src=lan→dest=wan，src_mac，proto=all，
+     * target=REJECT）→ uciCommit（core 安全提交 = session 预检 + apply{rollback} + confirm，
+     * apply 内部已 commit + firewall reload）；解除 = uciDelete 该 section → uciCommit。
+     * 成功本地即时更新集合（不等下拍轮询），并失效缓存对账；失败 Toast 分类文案 + logcat。
+     */
+    fun toggleBlock(macRaw: String, block: Boolean) {
+        val mac = macRaw.lowercase()
+        // 防重 + 弹窗期间轮询翻转竞态：以当前集合状态为准，已达标直接跳过
+        if (_state.value.busyMac != null || (mac in _state.value.blockedMacs) == block) return
+        viewModelScope.launch {
+            val gen = generation
+            _state.update { it.copy(busyMac = mac) }
+            try {
+                if (block) {
+                    val section = WrtCore.uciAdd("firewall", "rule")
+                    WrtCore.uciSet(
+                        "firewall",
+                        section,
+                        JSONObject().apply {
+                            put("name", ClientParsers.BLOCK_RULE_PREFIX + mac)
+                            put("src", "lan")
+                            put("dest", "wan")
+                            put("src_mac", mac)
+                            put("proto", "all")
+                            put("target", "REJECT")
+                        },
+                    )
+                    WrtCore.uciCommit("firewall")
+                    blockedCache = null
+                    finishWrite(gen) { it.copy(blockedMacs = it.blockedMacs + (mac to section)) }
+                } else {
+                    // 集合里没有（如读取失败期间点解除）：不盲删，回读设备端定位后再删
+                    val section = _state.value.blockedMacs[mac]
+                        ?: ensureBlocked(gen)?.get(mac)
+                    if (section == null) {
+                        _state.update {
+                            it.copy(
+                                busyMac = null,
+                                writeError = if (gen == generation) writeErrorText(R.string.client_block_failed) else null,
+                            )
+                        }
+                        return@launch
+                    }
+                    WrtCore.uciDelete("firewall", section)
+                    WrtCore.uciCommit("firewall")
+                    blockedCache = null
+                    finishWrite(gen) { it.copy(blockedMacs = it.blockedMacs - mac) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                writeFailed(gen, e, R.string.client_block_failed)
+            }
+        }
+    }
+
+    /**
+     * 一键静态绑定（防重复提交）：当前 IP 直接绑定 MAC
+     * （name 自动带入 hostname，空不写——无用户输入、无注入面）；uciAdd("dhcp","host") →
+     * uciSet{mac,ip,name?} → uciCommit("dhcp")（apply 触发 dnsmasq reload；设备在下次续租/重连
+     * 时才切换到绑定 IP——确认弹窗须写明）。
+     */
+    fun bindStatic(macRaw: String, ip: String, name: String?) {
+        val mac = macRaw.uppercase()
+        if (_state.value.busyMac != null || _state.value.staticHosts.any { it.mac == mac }) return
+        viewModelScope.launch {
+            val gen = generation
+            _state.update { it.copy(busyMac = mac.lowercase()) }
+            try {
+                val section = WrtCore.uciAdd("dhcp", "host")
+                WrtCore.uciSet(
+                    "dhcp",
+                    section,
+                    JSONObject().apply {
+                        put("mac", mac)
+                        put("ip", ip)
+                        if (!name.isNullOrBlank()) put("name", name)
+                    },
+                )
+                WrtCore.uciCommit("dhcp")
+                staticHostsCache = null
+                finishWrite(gen) { current ->
+                    current.copy(
+                        staticHosts = (current.staticHosts + StaticHost(section, mac, name?.takeIf(String::isNotBlank), ip))
+                            .sortedBy { it.mac },
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                writeFailed(gen, e, R.string.client_static_failed)
+            }
+        }
+    }
+
+    /** 取消静态绑定：删除该 MAC 的 @host section（本地集合定位，缺失回读设备端，不盲删），恢复动态分配 */
+    fun unbindStatic(macRaw: String) {
+        val mac = macRaw.uppercase()
+        if (_state.value.busyMac != null || _state.value.staticHosts.none { it.mac == mac }) return
+        viewModelScope.launch {
+            val gen = generation
+            _state.update { it.copy(busyMac = mac.lowercase()) }
+            try {
+                val section = _state.value.staticHosts.firstOrNull { it.mac == mac }?.section
+                    ?: ensureStatic(gen)?.firstOrNull { it.mac == mac }?.section
+                if (section == null) {
+                    _state.update {
+                        it.copy(
+                            busyMac = null,
+                            writeError = if (gen == generation) writeErrorText(R.string.client_static_failed) else null,
+                        )
+                    }
+                    return@launch
+                }
+                WrtCore.uciDelete("dhcp", section)
+                WrtCore.uciCommit("dhcp")
+                staticHostsCache = null
+                finishWrite(gen) { it.copy(staticHosts = it.staticHosts.filter { host -> host.mac != mac }) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                writeFailed(gen, e, R.string.client_static_failed)
+            }
+        }
+    }
+
+    /** Screen 呈现失败 Toast 后回调清除（一次性事件） */
+    fun consumeWriteError() {
+        _state.update { if (it.writeError == null) it else it.copy(writeError = null) }
     }
 
     private suspend fun ubusSafe(
