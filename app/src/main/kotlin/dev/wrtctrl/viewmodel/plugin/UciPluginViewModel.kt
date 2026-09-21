@@ -160,14 +160,9 @@ abstract class UciPluginViewModel(
     }
 
     private fun bridgeKind(kind: UciCandidates): String = when (kind) {
+        // hosthints 双键一次拉取双份回填，其余枚举的桥名即 kind 本名
         UciCandidates.HOSTHINTS_IP, UciCandidates.HOSTHINTS_MAC -> "hosthints"
-        UciCandidates.DEVICES -> "devices"
-        UciCandidates.INTERFACES -> "interfaces"
-        UciCandidates.ZONES -> "zones"
-        UciCandidates.PRINTERS -> "printers"
-        UciCandidates.HELPERS -> "helpers"
-        UciCandidates.IPSETS -> "ipsets"
-        UciCandidates.IFADDRS -> "ifaddrs"
+        else -> kind.kind
     }
 
     /** 写互斥单飞 + CancellationException 透传；失败 false（错误链进 logcat，UI 走分类文案） */

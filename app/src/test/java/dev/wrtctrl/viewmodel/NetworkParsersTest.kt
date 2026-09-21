@@ -125,7 +125,7 @@ class NetworkParsersTest {
                 "ssid":"Main","bssid":"11:22:33:44:55:66","signal":-52,"bitrate":866700,"mode":"Master",
                 "encryption":{"enabled":true,"wpa":[2,3],"authentication":["sae","psk"],"ciphers":["ccmp"]}},
               "interfaces":[
-                {"ifname":"phy0-ap0","config":{"mode":"ap"},"iwinfo":{"ssid":"Main","bssid":"11:22:33:44:55:66",
+                {"ifname":"phy0-ap0","section":"default_radio0","config":{"mode":"ap"},"iwinfo":{"ssid":"Main","bssid":"11:22:33:44:55:66",
                   "signal":-52,"bitrate":866700,"mode":"Master",
                   "encryption":{"enabled":true,"wpa":[2,3],"authentication":["sae","psk"],"ciphers":["ccmp"]}}}
               ]},
@@ -144,11 +144,30 @@ class NetworkParsersTest {
         assertEquals("a/n/ac/ax", radio.hwmodes) // hwmodes_text 原样
         val iface = radio.ifaces[0]
         assertEquals("Master", iface.mode) // iwinfo.mode 优先，config.mode（ap/sta）回落
+        assertEquals("default_radio0", iface.section) // uci 段名（无线编辑器跳转目标）
         assertEquals(-52, iface.signal)
         // hwmodes[] 回落路径：逗号+空格连接后大写（对齐旧 formatHwModes）
         assertEquals("B, G, N", radios[1].hwmodes)
         // JUnit4 无 delta 的 assertEquals(double,double) 已无条件抛错，双精度断言必须带 delta
         assertEquals(866700.0, iface.bitrate!!, 0.0)
+    }
+
+    @Test
+    fun `radio 启停态——wifi-device 段 disabled 提取、缺失段与未设置段回false、list 形态兼容`() {
+        val sections = JSONObject(
+            """
+            {"radio0":{"name":"radio0","section_type":"wifi-device","anonymous":false,
+              "options":{"type":"mac80211","band":"5g","disabled":"1"}},
+             "radio1":{"name":"radio1","section_type":"wifi-device","anonymous":false,
+              "options":{"type":"mtwifi","band":"2g"}},
+             "radio2":{"name":"radio2","section_type":"wifi-device","anonymous":false,
+              "options":{"disabled":["1"]}},
+             "wifinet1":{"name":"wifinet1","section_type":"wifi-iface","anonymous":false,
+              "options":{"disabled":"1"}}}
+            """.trimIndent(),
+        )
+        val disabled = NetworkParsers.radioDisabled(sections)
+        assertEquals(mapOf("radio0" to true, "radio1" to false, "radio2" to true), disabled)
     }
 
     @Test

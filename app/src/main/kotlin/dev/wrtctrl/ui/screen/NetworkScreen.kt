@@ -1,3 +1,7 @@
+@file:Suppress("TooManyFunctions")
+// TooManyFunctions：网络页单屏聚合三区块（接口/无线/系统设备）+ wifi 编辑覆盖分支与弹窗组件，
+// 拆文件只为过阈值伤内聚（PluginCommon/FirewallScreen 同款豁免）。
+
 package dev.wrtctrl.ui.screen
 
 import androidx.compose.animation.AnimatedVisibility
@@ -42,6 +46,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -77,8 +82,8 @@ import dev.wrtctrl.viewmodel.WifiIface
 import dev.wrtctrl.viewmodel.WifiSecret
 
 /** 网络页（三 Tab 合一屏）：接口（IP 大字 + UP/DOWN 徽章 + wan 实时速率 +
- *  开机累计）/ 无线（SSID 卡：加密 + 信道 + 信号档位 + 关联数 + 二维码）/ 系统设备（承载关系）。
- *  可见时 3s 静默轮询全量。 */
+ *  开机累计）/ 无线（radio 组条 + SSID 卡，分组改版）/ 系统设备（承载关系）。
+ *  可见时 3s 静默轮询全量；wifi 编辑覆盖页打开期间轮询暂停。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NetworkScreen(vm: NetworkViewModel, deviceId: String?, modifier: Modifier = Modifier) {
@@ -86,8 +91,31 @@ fun NetworkScreen(vm: NetworkViewModel, deviceId: String?, modifier: Modifier = 
     LaunchedEffect(deviceId) { vm.ensureLoaded(deviceId) }
     // showQrFor = 二维码弹窗的运行时 ifname（已移除认证环节，点动作直接拉凭据显码）
     var showQrFor by remember { mutableStateOf<String?>(null) }
-    // 可见才轮询：组合级可见（底部 Tab 选中）× 生命周期双门控（共享 PollingGate）
-    PollingGate(onActiveChange = vm::setPollingActive)
+    // wifi 编辑覆盖页：值 = wireless 的 uci section 名（radio 名或 iface 段名）；saveable 跨重建保留
+    var wifiEditor by rememberSaveable { mutableStateOf<String?>(null) }
+    var confirmToggleFor by rememberSaveable { mutableStateOf<String?>(null) }
+    var confirmToggleOn by rememberSaveable { mutableStateOf(false) }
+    var confirmRestartFor by rememberSaveable { mutableStateOf<String?>(null) }
+    val wifiHolder = rememberSaveableStateHolder()
+    val editorTarget = wifiEditor
+    if (editorTarget != null) {
+        WifiEditorCover(
+            target = editorTarget,
+            deviceId = deviceId,
+            modifier = modifier,
+            holder = wifiHolder,
+            onSaved = { vm.refreshWireless() },
+            onBack = { wifiEditor = null },
+        )
+        return
+    }
+    // 主内容分支同样包 provider：进编辑覆盖页时整块离开组合，
+    // holder 存下 LazyColumn 滚动位等 saveable 状态，返回原样恢复；未包 provider 则直接丢弃
+    wifiHolder.SaveableStateProvider("network_main") {
+        // 可见才轮询：组合级可见（底部 Tab 选中）× 生命周期双门控（共享 PollingGate）；
+        // 编辑覆盖页打开时本块离开组合 → onDispose 关停轮询（编辑页不轮询）
+        PollingGate(onActiveChange = vm::setPollingActive)
+    PluginWriteErrorEffect(state.opEventRes) { vm.consumeOpEvent() }
     showQrFor?.let { ifname ->
         WifiQrDialog(
             ifname,
@@ -96,6 +124,25 @@ fun NetworkScreen(vm: NetworkViewModel, deviceId: String?, modifier: Modifier = 
             onRetry = { vm.fetchWifiSecret(ifname) },
         ) { showQrFor = null }
     }
+    RadioActionDialogs(
+        toggleFor = confirmToggleFor,
+        toggleOn = confirmToggleOn,
+        restartFor = confirmRestartFor,
+        onToggle = { name, on ->
+            confirmToggleFor = null
+            confirmRestartFor = null
+            vm.setRadioEnabled(name, on)
+        },
+        onRestart = { name ->
+            confirmToggleFor = null
+            confirmRestartFor = null
+            vm.restartRadio(name)
+        },
+        onDismiss = {
+            confirmToggleFor = null
+            confirmRestartFor = null
+        },
+    )
     PullToRefreshBox(
         isRefreshing = state.refreshing,
         onRefresh = vm::refresh,
@@ -144,19 +191,17 @@ fun NetworkScreen(vm: NetworkViewModel, deviceId: String?, modifier: Modifier = 
                         item { SectionText(stringResource(R.string.common_load_failed)) }
                     state.radios.isEmpty() ->
                         item { SectionText(stringResource(R.string.wifi_no_radio)) }
-                    else ->
-                        items(
-                            state.radios.flatMap { radio -> radio.ifaces.map { radio to it } },
-                            key = { it.second.ifname },
-                        ) { (radio, iface) ->
-                            SsidCard(
-                                radio = radio,
-                                iface = iface,
-                                assocCount = state.assocCounts[iface.ifname],
-                                secret = state.wifiSecrets[iface.ifname],
-                                onRequestWifi = { requestWifi(iface.ifname) },
-                            )
-                        }
+                    // 分组改版：radio 组条（启停/重启/详情）+ 其下 SSID 卡；空 radio 组也显示组条
+                    else -> wirelessItems(
+                        state = state,
+                        requestWifi = { requestWifi(it) },
+                        onAskToggle = { name, on ->
+                            confirmToggleFor = name
+                            confirmToggleOn = on
+                        },
+                        onAskRestart = { confirmRestartFor = it },
+                        onOpenEditor = { wifiEditor = it },
+                    )
                 }
                 item { GroupHeader(stringResource(R.string.network_sys_devices), Modifier.padding(top = 8.dp)) }
                 val sysDevices = state.deviceGroups.filter { it.type != "bridge" }.flatMap { it.devices }
@@ -173,6 +218,97 @@ fun NetworkScreen(vm: NetworkViewModel, deviceId: String?, modifier: Modifier = 
                 }
             }
         }
+    }
+    }
+}
+
+/** 无线分组条目：radio 组条（启停/重启/详情）+ 其下 SSID 卡 */
+private fun androidx.compose.foundation.lazy.LazyListScope.wirelessItems(
+    state: NetworkUiState,
+    requestWifi: (String) -> Unit,
+    onAskToggle: (String, Boolean) -> Unit,
+    onAskRestart: (String) -> Unit,
+    onOpenEditor: (String) -> Unit,
+) {
+    state.radios.forEach { radio ->
+        item(key = "radio_${radio.name}") {
+            RadioBar(
+                radio = radio,
+                busy = state.busyRadio == radio.name,
+                onToggle = { on -> onAskToggle(radio.name, on) },
+                onRestart = { onAskRestart(radio.name) },
+                onEdit = { onOpenEditor(radio.name) },
+            )
+        }
+        radio.ifaces.forEach { iface ->
+            // key 不能用裸 ifname：radio 关停后运行时名变空串，多个空串 key 直接崩
+            // ；section 全局唯一（uci 段名），缺省回落 radio 名前缀
+            item(key = iface.section ?: "iface_${radio.name}_${iface.ifname}") {
+                SsidCard(
+                    radio = radio,
+                    iface = iface,
+                    assocCount = state.assocCounts[iface.ifname],
+                    secret = state.wifiSecrets[iface.ifname],
+                    onRequestWifi = { requestWifi(iface.ifname) },
+                    // 段名缺失（个别固件 status 不带 section）→ 不显编辑入口
+                    onEdit = iface.section?.let { section -> { onOpenEditor(section) } },
+                )
+            }
+        }
+    }
+}
+
+/** wifi 编辑覆盖分支：SaveableStateProvider 按 deviceId|target 保留（切设备后旧段草稿不复活） */
+@Composable
+private fun WifiEditorCover(
+    target: String,
+    deviceId: String?,
+    modifier: Modifier,
+    holder: androidx.compose.runtime.saveable.SaveableStateHolder,
+    onSaved: () -> Unit,
+    onBack: () -> Unit,
+) {
+    Box(modifier) {
+        holder.SaveableStateProvider("wifi_edit_${deviceId}_$target") {
+            WifiEditorScreen(
+                target = target,
+                deviceId = deviceId,
+                onSaved = onSaved,
+                onBack = onBack,
+            )
+        }
+    }
+}
+
+/** radio 启停/重启的高危确认弹窗（wireless 高危红字；文案覆盖断连预期） */
+@Composable
+private fun RadioActionDialogs(
+    toggleFor: String?,
+    toggleOn: Boolean,
+    restartFor: String?,
+    onToggle: (String, Boolean) -> Unit,
+    onRestart: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    toggleFor?.let { radioName ->
+        PluginConfirmDialog(
+            title = stringResource(if (toggleOn) R.string.wifi_radio_on_title else R.string.wifi_radio_off_title),
+            body = stringResource(R.string.wifi_radio_toggle_body),
+            confirmText = stringResource(R.string.wifi_toggle_ok),
+            highRisk = true,
+            onConfirm = { onToggle(radioName, toggleOn) },
+            onDismiss = onDismiss,
+        )
+    }
+    restartFor?.let { radioName ->
+        PluginConfirmDialog(
+            title = stringResource(R.string.wifi_restart_title),
+            body = stringResource(R.string.wifi_radio_toggle_body),
+            confirmText = stringResource(R.string.wifi_toggle_ok),
+            highRisk = true,
+            onConfirm = { onRestart(radioName) },
+            onDismiss = onDismiss,
+        )
     }
 }
 
@@ -378,7 +514,8 @@ private fun SubChip(label: String, value: String) {
     )
 }
 
-/** SSID 卡：：SSID 行整行点击复制+ 加密/信道 + 信号档位 + 关联终端数 + 右侧二维码缩略（「放大」） */
+/** SSID 卡：：SSID 行整行点击复制+ 加密/信道 + 信号档位 + 关联终端数 + 右侧二维码缩略（「放大」）；
+ *  元信息行尾加「详情 →」编辑入口（段名缺失时 onEdit=null 不显示） */
 @Composable
 private fun SsidCard(
     radio: RadioInfo,
@@ -386,9 +523,14 @@ private fun SsidCard(
     assocCount: Int?,
     secret: WifiSecret?,
     onRequestWifi: () -> Unit,
+    onEdit: (() -> Unit)? = null,
 ) {
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
+    // radio 关停后运行时 ifname 与 iwinfo ssid 均为空——标题回退 uci section 名
+    val title = iface.ssid?.takeIf { it.isNotBlank() }
+        ?: iface.ifname.takeIf { it.isNotBlank() }
+        ?: iface.section.orEmpty()
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp)) {
             // SSID 行整行点击复制（隐式复制惯例，同 CopyableRow 反馈）
@@ -397,13 +539,13 @@ private fun SsidCard(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(8.dp))
                     .clickable {
-                        clipboard.setText(AnnotatedString(iface.ssid ?: iface.ifname))
+                        clipboard.setText(AnnotatedString(title))
                         Toast.makeText(context, context.getString(R.string.common_copied), Toast.LENGTH_SHORT).show()
                     },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    iface.ssid ?: iface.ifname,
+                    title,
                     Modifier.weight(1f),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
@@ -413,23 +555,29 @@ private fun SsidCard(
             }
             Row(
                 Modifier.fillMaxWidth().padding(top = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                // 左侧内容 weight 填满贴右缘（不放占位 Spacer）
+                val meta = buildList {
+                    add(
+                        NetworkParsers.encryptionLabel(
+                            iface.encryption,
+                            stringResource(R.string.network_no_encryption),
+                            stringResource(R.string.network_encrypted),
+                        ),
+                    )
+                    radio.channel?.let { add("Ch $it") }
+                }.joinToString(" · ")
                 Text(
-                    NetworkParsers.encryptionLabel(
-                        iface.encryption,
-                        stringResource(R.string.network_no_encryption),
-                        stringResource(R.string.network_encrypted),
-                    ),
+                    meta,
+                    Modifier.weight(1f),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                radio.channel?.let {
-                    Text(
-                        "Ch $it",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                if (onEdit != null) {
+                    TextButton(onClick = onEdit, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                        Text(stringResource(R.string.entry_details))
+                    }
                 }
             }
             Row(

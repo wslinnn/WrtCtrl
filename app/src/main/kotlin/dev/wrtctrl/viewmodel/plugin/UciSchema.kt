@@ -38,6 +38,20 @@ enum class UciCandidates(val kind: String) {
 
     /** 接口 IPv4（usb-printer bind：选接口写其 IP，对齐 LuCI network_netlist） */
     IFADDRS("ifaddrs"),
+
+    // ── iwinfo 实时枚举（wifi 编辑器用；candidates 通道 param = radio section 名） ──
+
+    /** 合法信道（auto 由静态选项提供；受限/无 IR 项 Rust 侧已滤） */
+    FREQLIST("freqlist"),
+
+    /** 设备可用带宽（HT20…HE/EHT…；空回落静态白名单） */
+    HTMODES("htmodes"),
+
+    /** 功率档位（dBm；MTK 百分比语义不走此候选——schema 按 type 分支） */
+    TXPOWERLIST("txpowerlist"),
+
+    /** 国家码（二字码 + 国家名 label） */
+    COUNTRYLIST("countrylist"),
 }
 
 /** 下拉/候选单条。labelRes 用于静态选项的多语言（如 ACCEPT→接受）；动态候选用 label 原串 */

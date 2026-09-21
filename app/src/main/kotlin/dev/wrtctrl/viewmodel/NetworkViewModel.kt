@@ -2,8 +2,10 @@ package dev.wrtctrl.viewmodel
 
 import android.app.Application
 import android.os.SystemClock
+import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.wrtctrl.R
 import dev.wrtctrl.bridge.WrtCore
 import dev.wrtctrl.util.Format
 import kotlinx.coroutines.CancellationException
@@ -42,6 +44,10 @@ data class NetworkUiState(
     val loadFailed: Boolean = false,
     /** 无线最近一次拉取失败（首拉失败以失败文案区分「没有无线设备」） */
     val wirelessFailed: Boolean = false,
+    /** radio 启停/重启写互斥（进行中的 radio section 名；组条开关转圈防重复写） */
+    val busyRadio: String? = null,
+    /** 一次性操作结果（失败 toast / 重启已下发提示；Screen 消费后清空） */
+    @StringRes val opEventRes: Int? = null,
 )
 
 /**
@@ -50,7 +56,11 @@ data class NetworkUiState(
  * 轮询：页面可见期间每 3s 静默刷新全量，离开页面/后台暂停（PollingGate 双门控）。
  * 拉取失败静默保留旧值，仅置 failed 标志供空列表时显示失败文案；
  * 切设备整页失效重拉+ generation 守卫丢弃在飞的旧设备响应。
+ *
+ * TooManyFunctions：加载/轮询/凭据/radio 写序列是网络页职责全集（ClientViewModel/
+ * UciPluginViewModel 同款类级豁免），拆分会把无线写与凭据语义打散。
  */
+@Suppress("TooManyFunctions")
 class NetworkViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(NetworkUiState())
     val state: StateFlow<NetworkUiState> = _state
@@ -167,10 +177,13 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    /** 无线：失败保留旧列表，仅置 wirelessFailed 供空态分支；成功后逐 ifname 拉 assoc 计数 */
+    /** 无线：失败保留旧列表，仅置 wirelessFailed 供空态分支；成功后逐 ifname 拉 assoc 计数。
+     *  并行补一次 uciGet("wireless") 取 radio 启停态（netifd status 不含 disabled option）；
+     *  uci 读取失败保留 disabled=false 缺省（启停写路径权威，开关仍可用） */
     private suspend fun loadWirelessNow() {
         val gen = generation
         val payload = ubusSafe("luci-rpc", "getWirelessDevices")
+        val uciWireless = uciWirelessSafe()
         val radios = payload?.let {
             try {
                 NetworkParsers.radios(it)
@@ -185,15 +198,94 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
             if (gen == generation) _state.update { it.copy(wirelessFailed = true) }
             return
         }
+        val disabledMap = uciWireless?.let {
+            try {
+                NetworkParsers.radioDisabled(it)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("wrtctrl", "radio disabled parse failed: ${e.message}")
+                emptyMap()
+            }
+        } ?: emptyMap()
+        val merged = radios.map { radio -> radio.copy(disabled = disabledMap[radio.name] ?: false) }
         val counts = mutableMapOf<String, Int>()
-        radios.flatMap { it.ifaces }.forEach { iface ->
+        merged.flatMap { it.ifaces }.forEach { iface ->
             val ifname = iface.ifname
             if (ifname.isNotBlank()) assocCount(ifname)?.let { counts[ifname] = it }
         }
         if (gen != generation) return
         _state.update {
-            it.copy(radios = radios, assocCounts = counts, wirelessLoaded = true, wirelessFailed = false)
+            it.copy(radios = merged, assocCounts = counts, wirelessLoaded = true, wirelessFailed = false)
         }
+    }
+
+    /**
+     * radio 启停（高危确认后调用；setRadioEnabled 内含 disabled OR 同步 + commit + wifi up
+     * 兜底——该写路径的首个实测验证点）。成功乐观置位 + 静默重拉校正；失败 toast + 重拉恢复真相。
+     */
+    fun setRadioEnabled(radioName: String, enabled: Boolean) {
+        if (_state.value.busyRadio != null) return
+        viewModelScope.launch {
+            _state.update { it.copy(busyRadio = radioName) }
+            val gen = generation
+            val ok = try {
+                withContext(Dispatchers.IO) { WrtCore.setRadioEnabled(radioName, enabled) }
+                true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("wrtctrl", "radio $radioName toggle failed: ${e.message}")
+                false
+            }
+            if (gen != generation) return@launch
+            if (ok) {
+                _state.update { st ->
+                    st.copy(
+                        busyRadio = null,
+                        radios = st.radios.map { if (it.name == radioName) it.copy(disabled = !enabled) else it },
+                    )
+                }
+            } else {
+                _state.update { it.copy(busyRadio = null, opEventRes = R.string.wifi_op_failed) }
+            }
+            loadWirelessNow()
+        }
+    }
+
+    /** radio 重启（/sbin/wifi up，luci 同路径；不校验退出码，与 LuCI 一致的 best-effort 语义） */
+    fun restartRadio(radioName: String) {
+        if (_state.value.busyRadio != null) return
+        viewModelScope.launch {
+            _state.update { it.copy(busyRadio = radioName) }
+            val gen = generation
+            val ok = try {
+                withContext(Dispatchers.IO) { WrtCore.restartRadio(radioName) }
+                true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("wrtctrl", "radio $radioName restart failed: ${e.message}")
+                false
+            }
+            if (gen != generation) return@launch
+            _state.update {
+                it.copy(
+                    busyRadio = null,
+                    opEventRes = if (ok) R.string.wifi_restart_sent else R.string.wifi_op_failed,
+                )
+            }
+            loadWirelessNow()
+        }
+    }
+
+    fun consumeOpEvent() {
+        _state.update { it.copy(opEventRes = null) }
+    }
+
+    /** 无线编辑器保存后的强刷入口（无视 wirelessLoaded 直接静默重拉） */
+    fun refreshWireless() {
+        viewModelScope.launch { loadWirelessNow() }
     }
 
     /** wan 实时速率（差分末值）：失败/无 wan 静默保留旧值语义——置 null 不显示该行 */
@@ -290,6 +382,16 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
     private fun markWifiSecretFailed(gen: Int, ifname: String, reason: String) {
         if (gen != generation) return
         _state.update { it.copy(wifiSecretErrors = it.wifiSecretErrors + (ifname to reason)) }
+    }
+
+    /** uci wireless 读取（radio 启停态源）；失败 null 静默（保留缺省 disabled=false，开关仍可用） */
+    private suspend fun uciWirelessSafe(): JSONObject? = try {
+        withContext(Dispatchers.IO) { WrtCore.uciGet("wireless") }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        android.util.Log.w("wrtctrl", "uci wireless load failed: ${e.message}")
+        null
     }
 
     private suspend fun ubusSafe(

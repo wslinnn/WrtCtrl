@@ -305,6 +305,8 @@ fun UciEditPage(
     onDelete: (() -> Unit)?,
     onCancel: () -> Unit,
     onSave: (values: JSONObject) -> Unit,
+    /** 确认弹窗正文覆盖（wifi 保存需说明断连与回滚；null = 通用文案） */
+    confirmBodyRes: Int? = null,
 ) {
     var draft by rememberSaveable(stateSaver = PluginDraftSaver) {
         mutableStateOf(
@@ -393,7 +395,7 @@ fun UciEditPage(
     if (confirmOpen) {
         PluginConfirmDialog(
             title = stringResource(R.string.plugin_save),
-            body = stringResource(R.string.plugin_save_confirm),
+            body = stringResource(confirmBodyRes ?: R.string.plugin_save_confirm),
             confirmText = stringResource(R.string.plugin_save),
             highRisk = highRisk,
             onConfirm = {

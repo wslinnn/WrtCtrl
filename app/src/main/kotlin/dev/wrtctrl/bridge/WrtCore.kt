@@ -50,7 +50,7 @@ object WrtCore {
     private external fun uciOrderNative(config: String, sectionsJson: String): String
     private external fun uciCommitNative(config: String): String
     private external fun applyNative(initScript: String, action: String): String
-    private external fun candidatesNative(kind: String): String
+    private external fun candidatesNative(kind: String, param: String): String
     private external fun readFileNative(path: String): String
     private external fun writeFileNative(path: String, data: String, mode: String): String
     private external fun readSyslogNative(): String
@@ -153,9 +153,12 @@ object WrtCore {
 
     // ── 候选 ──
 
-    suspend fun candidates(kind: String): JSONArray = dataArray { candidatesNative(kind) }
-    suspend fun hostHints(): JSONObject = dataObject { candidatesNative("hosthints") }
-    suspend fun usbPrinters(): JSONObject = dataObject { candidatesNative("printers") }
+    /** param：iwinfo 实时枚举四类（freqlist/htmodes/txpowerlist/countrylist）的 device 参数
+     *  = radio uci section 名；其余 kind 忽略 */
+    suspend fun candidates(kind: String, param: String = ""): JSONArray =
+        dataArray { candidatesNative(kind, param) }
+    suspend fun hostHints(): JSONObject = dataObject { candidatesNative("hosthints", "") }
+    suspend fun usbPrinters(): JSONObject = dataObject { candidatesNative("printers", "") }
 
     // ── 文件 / 日志 ──
 

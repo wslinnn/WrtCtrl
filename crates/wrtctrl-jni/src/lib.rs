@@ -409,17 +409,20 @@ pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_applyNative(
     guarded!(env, async move { client().apply(&init_script, &action).await })
 }
 
-/// 候选查询：kind ∈ hosthints/devices/interfaces/zones/printers（helpers 已砍）
+/// 候选查询：kind ∈ hosthints/devices/interfaces/zones/printers/helpers/ipsets/ifaddrs
+/// + iwinfo 实时枚举四类（freqlist/htmodes/txpowerlist/countrylist，param=device 即 radio section 名）
 #[no_mangle]
 pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_candidatesNative(
     mut env: JNIEnv,
     _class: JClass,
     kind: JString,
+    param: JString,
 ) -> jstring {
-    let kind = jstr(&mut env, &kind);
+    let (kind, param) = (jstr(&mut env, &kind), jstr(&mut env, &param));
+    let kind_str = kind.as_str();
     guarded!(env, async move {
         let client = client();
-        Ok(match kind.as_str() {
+        Ok(match kind_str {
             "hosthints" => serde_json::to_value(client.get_host_hint_candidates().await)?,
             "devices" => serde_json::to_value(client.get_device_candidates().await)?,
             "interfaces" => serde_json::to_value(client.get_interface_candidates().await)?,
@@ -429,6 +432,10 @@ pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_candidatesNative(
             "helpers" => serde_json::to_value(client.get_conntrack_helpers().await)?,
             "ipsets" => serde_json::to_value(client.get_ipset_candidates().await)?,
             "ifaddrs" => serde_json::to_value(client.get_ifaddr_candidates().await)?,
+            // wifi 编辑器实时枚举（param 空时返回空列表，上层回退静态枚举）
+            "freqlist" | "htmodes" | "txpowerlist" | "countrylist" => {
+                serde_json::to_value(client.get_iwinfo_candidates(kind_str, &param).await)?
+            }
             other => {
                 return Err(UbusError::InvalidArgument(format!(
                     "unknown candidates kind: {other}"

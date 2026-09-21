@@ -47,6 +47,8 @@ data class WifiIface(
     val ifname: String,
     /** uci config.network 列表——与 uci section 的 network 交集做关联 */
     val networks: List<String>,
+    /** uci wifi-iface section 名（netifd status interfaces[].section；无线编辑器跳转目标） */
+    val section: String? = null,
     val ssid: String?,
     val mode: String?,
     val bssid: String?,
@@ -65,6 +67,8 @@ data class RadioInfo(
     val channel: String?,
     /** hwmodes_text 回落 hwmodes[] join("/") 大写；协议行 = "802.11" + 它 */
     val hwmodes: String?,
+    /** uci disabled=='1'（radio 组条启停开关态；uci 读取失败缺省 false=启用） */
+    val disabled: Boolean = false,
     val ifaces: List<WifiIface>,
 )
 
@@ -178,6 +182,7 @@ internal object NetworkParsers {
                     WifiIface(
                         ifname = ifEntry.optString("ifname"),
                         networks = ifEntry.optJSONObject("config")?.let { stringList(it, "network") } ?: emptyList(),
+                        section = ifEntry.optString("section").takeIf(String::isNotBlank),
                         ssid = ifIw?.optString("ssid")?.takeIf(String::isNotBlank),
                         // iwinfo.mode（Master/Client）优先，config.mode（ap/sta）回落
                         mode = ifIw?.optString("mode")?.takeIf(String::isNotBlank)
@@ -203,6 +208,22 @@ internal object NetworkParsers {
                 ifaces = ifaces,
             )
         }.sortedBy { it.name }.toList()
+    }
+
+    /**
+     * radio 启停态（无线 Tab 组条开关）：uciGet("wireless") 的 wifi-device 段名 → disabled=='1'。
+     * 独立于 getWirelessDevices（netifd status 不含该 uci option）；段缺失/未设置 = 启用（false）。
+     */
+    fun radioDisabled(uciData: JSONObject): Map<String, Boolean> {
+        val out = mutableMapOf<String, Boolean>()
+        for (key in uciData.keys()) {
+            val section = uciData.optJSONObject(key) ?: continue
+            if (section.optString("section_type") != "wifi-device") continue
+            val options = section.optJSONObject("options") ?: continue
+            val raw = options.optJSONArray("disabled")?.optString(0) ?: options.optString("disabled")
+            out[key] = raw == "1"
+        }
+        return out
     }
 
     /**

@@ -8,7 +8,7 @@
 use crate::rpc::RouterClient;
 use crate::uci::UCI_CALL_TIMEOUT;
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::time::Duration;
 
 /// file.exec detectlp 超时
@@ -245,6 +245,23 @@ impl RouterClient {
         out
     }
 
+    /// iwinfo 实时枚举（信道/带宽/功率/国家码下拉来自实时 iwinfo）。
+    /// kind ∈ freqlist|htmodes|txpowerlist|countrylist，device = radio 的 uci section 名
+    /// （luci 同款用法——CBIWifiFrequencyValue 即以 section 名调 iwinfo）。
+    /// 空 device / 失败 → 空列表（候选缺失回退静态枚举，不阻塞编辑页）。
+    pub async fn get_iwinfo_candidates(&self, kind: &str, device: &str) -> Vec<Candidate> {
+        if device.is_empty() {
+            return Vec::new();
+        }
+        match self
+            .call_ubus("iwinfo", kind, json!({"device": device}), UCI_CALL_TIMEOUT)
+            .await
+        {
+            Ok(payload) => parse_iwinfo_candidates(kind, &payload),
+            Err(_) => Vec::new(),
+        }
+    }
+
     /// USB 打印机发现：file.exec /usr/bin/detectlp（复用 luci 同款脚本）。
     /// stdout 每行 "devname,product,model,description..."；
     /// product=VID/PID/VER 内核串（即 uci device 的真实 value）。
@@ -320,6 +337,100 @@ impl RouterClient {
     }
 }
 
+/// 候选去重追加（freqlist 个别驱动可能重复上报信道）
+fn push_unique(out: &mut Vec<Candidate>, value: String, label: String) {
+    if !value.is_empty() && out.iter().all(|c| c.value != value) {
+        out.push(candidate(value, label));
+    }
+}
+
+/// iwinfo 响应纯解析（单测锚定）：results 数组按 kind 分形组装 value/label。
+/// - freqlist：value=信道号，label=`号 (MHz)`；restricted 项跳过（luci 禁选同语义）；
+///   no_ir（禁止射频发射）项同跳——选中会导致 AP 起不来
+/// - htmodes：字符串数组（兼容对象键形态）
+/// - txpowerlist：value=dBm 数值串（MTK 百分比语义由上层按 type 分支降级 TEXT，不走此列）
+/// - countrylist：value=二字码，label=`国家 (码)`
+pub(crate) fn parse_iwinfo_candidates(kind: &str, payload: &Value) -> Vec<Candidate> {
+    let results = payload.get("results");
+    let Some(results) = results else {
+        return Vec::new();
+    };
+    let mut out: Vec<Candidate> = Vec::new();
+    match kind {
+        // 带宽：字符串数组；个别 iwinfo 版本 results 为映射（键即模式名），兼容取键
+        "htmodes" => match results.as_array() {
+            Some(arr) => arr.iter().for_each(|m| match m.as_str() {
+                Some(s) => push_unique(&mut out, s.to_string(), s.to_string()),
+                None => {
+                    if let Some(obj) = m.as_object() {
+                        for key in obj.keys() {
+                            push_unique(&mut out, key.to_string(), key.to_string());
+                        }
+                    }
+                }
+            }),
+            None => {
+                if let Some(obj) = results.as_object() {
+                    for key in obj.keys() {
+                        push_unique(&mut out, key.to_string(), key.to_string());
+                    }
+                }
+            }
+        },
+        // 其余 kinds 均要求 results 为数组
+        _ => {
+            let Some(arr) = results.as_array() else {
+                return out;
+            };
+            match kind {
+                "freqlist" => arr.iter().for_each(|f| {
+                    let restricted = f.get("restricted").and_then(|v| v.as_bool()) == Some(true)
+                        || f.get("no_ir").and_then(|v| v.as_bool()) == Some(true);
+                    if restricted {
+                        return;
+                    }
+                    let Some(ch) = f.get("channel").and_then(|v| v.as_i64()) else {
+                        return;
+                    };
+                    if ch <= 0 {
+                        return;
+                    }
+                    let mhz = f.get("mhz").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let label = if mhz > 0 {
+                        format!("{ch} ({mhz} MHz)")
+                    } else {
+                        ch.to_string()
+                    };
+                    push_unique(&mut out, ch.to_string(), label);
+                }),
+                "txpowerlist" => arr.iter().for_each(|t| {
+                    let Some(dbm) = t.get("dbm").and_then(|v| v.as_i64()) else {
+                        return;
+                    };
+                    push_unique(&mut out, dbm.to_string(), format!("{dbm} dBm"));
+                }),
+                "countrylist" => arr.iter().for_each(|c| {
+                    let Some(code) = c.get("code").and_then(|v| v.as_str()) else {
+                        return;
+                    };
+                    if code.is_empty() {
+                        return;
+                    }
+                    let name = c.get("country").and_then(|v| v.as_str()).unwrap_or("");
+                    let label = if name.is_empty() {
+                        code.to_string()
+                    } else {
+                        format!("{name} ({code})")
+                    };
+                    push_unique(&mut out, code.to_string(), label);
+                }),
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
 /// serde 形状对齐守卫：JNI 边界 JSON 键必须与 Kotlin 侧 UciCandidates 解析契约一致
 #[test]
 fn host_hints_json_shape_is_camel_case() {
@@ -333,4 +444,69 @@ fn host_hints_json_shape_is_camel_case() {
     let v = serde_json::to_value(&hints).unwrap();
     assert!(v.get("hosthintsMac").is_some());
     assert!(v.get("hosthintsIp").is_some());
+}
+
+#[test]
+fn iwinfo_freqlist_skips_restricted_and_no_ir() {
+    let payload = json!({"results": [
+        {"channel": 1, "mhz": 2412, "restricted": false},
+        {"channel": 12, "mhz": 2467, "restricted": true},
+        {"channel": 0, "mhz": 2412},
+        {"channel": 36, "mhz": 5180, "no_ir": true},
+        {"channel": 6, "mhz": 2437, "restricted": false},
+        {"channel": 6, "mhz": 2437, "restricted": false}
+    ]});
+    let out = parse_iwinfo_candidates("freqlist", &payload);
+    assert_eq!(
+        out,
+        vec![
+            Candidate {
+                value: "1".into(),
+                label: "1 (2412 MHz)".into()
+            },
+            Candidate {
+                value: "6".into(),
+                label: "6 (2437 MHz)".into()
+            }
+        ]
+    );
+}
+
+#[test]
+fn iwinfo_htmodes_and_txpower_and_country() {
+    let modes = parse_iwinfo_candidates(
+        "htmodes",
+        &json!({"results": ["HT20", "HE40", "HE20", "HE40"]}),
+    );
+    assert_eq!(modes.len(), 3);
+    assert_eq!(modes[0].value, "HT20");
+
+    // 对象键形态兼容（个别 iwinfo 版本 results 为映射）
+    let obj_modes = parse_iwinfo_candidates(
+        "htmodes",
+        &json!({"results": {"HT20": true, "HT40": false}}),
+    );
+    assert_eq!(obj_modes.len(), 2);
+
+    let tx = parse_iwinfo_candidates(
+        "txpowerlist",
+        &json!({"results": [{"dbm": 20}, {"dbm": 16}, {"dbm": 20}]}),
+    );
+    assert_eq!(tx[0].value, "20");
+    assert_eq!(tx[0].label, "20 dBm");
+    assert_eq!(tx.len(), 2);
+
+    let country = parse_iwinfo_candidates(
+        "countrylist",
+        &json!({"results": [{"code": "CN", "country": "China"}, {"code": "00"}]}),
+    );
+    assert_eq!(country[0].value, "CN");
+    assert_eq!(country[0].label, "China (CN)");
+    assert_eq!(country[1].label, "00");
+}
+
+#[test]
+fn iwinfo_unknown_kind_and_missing_results_are_empty() {
+    assert!(parse_iwinfo_candidates("nope", &json!({"results": [{"dbm": 1}]})).is_empty());
+    assert!(parse_iwinfo_candidates("freqlist", &json!({})).is_empty());
 }
