@@ -119,4 +119,8 @@
     <string name="wifi_secret_failed">密码拉取失败</string>
     <string name="wifi_secret_retry">重试</string>
     <string name="wifi_ssid_label">SSID</string>
+    <!-- 系统进程页独立搜索提示（此前复用 conntrack_search「IP/协议/端口」，与实际过滤字段 name/pid/user/command 不符） -->
+    <string name="process_search">搜索 名称/PID/用户/命令</string>
+    <!-- 返回箭头 a11y 统一键（此前「取消」/null 三处不一致） -->
+    <string name="common_back">返回</string>
 </resources>

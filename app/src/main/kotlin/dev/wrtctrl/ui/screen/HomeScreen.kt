@@ -578,7 +578,8 @@ private fun BandwidthChart(
     // （配置常驻，数据只走 producer）。Vico 3 禁止轴标签空串，兜底 "--"。
     val currentTs by rememberUpdatedState(chartTs)
     Box(modifier) {
-        if (rx.isEmpty()) {
+        // 双序列同空/同非空（VM 侧成对更新），组件级双守卫防结构性不变量被未来改动破坏
+        if (rx.isEmpty() || tx.isEmpty()) {
             Text(
                 stringResource(R.string.home_chart_collecting),
                 Modifier.align(Alignment.Center),

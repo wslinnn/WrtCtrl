@@ -64,7 +64,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -83,6 +82,8 @@ import dev.wrtctrl.data.Device
 import dev.wrtctrl.data.ThemeMode
 import dev.wrtctrl.data.ThemePrefs
 import dev.wrtctrl.net.LocalNetPermission
+import dev.wrtctrl.ui.component.BadgeTone
+import dev.wrtctrl.ui.component.badgeToneColor
 import dev.wrtctrl.viewmodel.AppViewModel
 import dev.wrtctrl.viewmodel.GateMode
 import dev.wrtctrl.viewmodel.GateUiState
@@ -362,8 +363,12 @@ private fun DeviceCard(
 private fun PingBadge(pingMs: Long?, detecting: Boolean) {
     val (text, color) = when {
         detecting -> stringResource(R.string.device_list_ping_checking) to MaterialTheme.colorScheme.onSurfaceVariant
-        pingMs == null -> stringResource(R.string.device_list_ping_offline) to MaterialTheme.colorScheme.error
-        else -> "${pingMs}ms" to pingColor(pingMs)
+        pingMs == null -> stringResource(R.string.device_list_ping_offline) to badgeToneColor(BadgeTone.ERR)
+        else -> "${pingMs}ms" to when {
+            pingMs < 100 -> badgeToneColor(BadgeTone.OK)
+            pingMs < 300 -> badgeToneColor(BadgeTone.WARN)
+            else -> badgeToneColor(BadgeTone.ERR)
+        }
     }
     Text(
         text,
@@ -371,12 +376,6 @@ private fun PingBadge(pingMs: Long?, detecting: Boolean) {
         color = color,
         textAlign = TextAlign.End,
     )
-}
-
-private fun pingColor(ms: Long): Color = when {
-    ms < 100 -> Color(0xFF2E7D32)
-    ms < 300 -> Color(0xFFB26A00)
-    else -> Color(0xFFC62828)
 }
 
 @Composable

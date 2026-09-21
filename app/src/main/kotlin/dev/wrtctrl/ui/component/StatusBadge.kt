@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -51,9 +52,9 @@ fun StatusBadge(
 ) {
     val dark = isSystemInDarkTheme()
     val fg = toneForeground(tone, dark)
-    // 中性 chip 走 surfaceVariant 实底（网关/DNS 值条）；语义色容器 = 同系双色斜向淡渐变
+    // 中性 chip 走 surfaceVariant 实底（SolidColor 零渐变开销）；语义色容器 = 同系双色斜向淡渐变
     val container = if (tone == BadgeTone.NEUTRAL) {
-        Brush.linearGradient(listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.surfaceVariant))
+        SolidColor(MaterialTheme.colorScheme.surfaceVariant)
     } else if (dark) {
         Brush.linearGradient(listOf(fg.copy(alpha = 0.20f), fg.copy(alpha = 0.06f)))
     } else {

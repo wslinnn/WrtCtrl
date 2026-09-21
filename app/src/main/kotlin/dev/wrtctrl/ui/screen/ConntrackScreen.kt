@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -83,8 +84,11 @@ fun ConntrackScreen(deviceId: String?, onBack: () -> Unit) {
             when {
                 state.loading -> ToolStateBox(spinner = true)
                 else -> {
-                    val rows = state.rows.filterMatching(keyword) {
-                        listOf(it.protocol, it.network, it.src, it.dst, it.sport?.toString(), it.dport?.toString())
+                    // 过滤结果 remember（5s 轮询每次重组都重算）
+                    val rows = remember(state.rows, keyword) {
+                        state.rows.filterMatching(keyword) {
+                            listOf(it.protocol, it.network, it.src, it.dst, it.sport?.toString(), it.dport?.toString())
+                        }
                     }
                     when {
                         rows.isEmpty() && state.loadFailed -> ToolStateBox(toolLoadFailedText())
@@ -102,7 +106,11 @@ fun ConntrackScreen(deviceId: String?, onBack: () -> Unit) {
                                 contentPadding = ToolListPadding,
                                 verticalArrangement = ToolItemSpacing,
                             ) {
-                                items(rows.size) { i ->
+                                // 五元组 key：列表按字节数降序重排，位置 key 会全行错位重组
+                                items(rows.size, key = { i ->
+                                    val r = rows[i]
+                                    "${r.protocol}-${r.src}-${r.sport}-${r.dst}-${r.dport}"
+                                }) { i ->
                                     ConnRowCard(rows[i], state.dnsCache)
                                 }
                             }

@@ -72,7 +72,7 @@ fun ToolPage(
             IconButton(onClick = onBack) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.common_cancel),
+                    contentDescription = stringResource(R.string.common_back),
                 )
             }
             Text(title, style = MaterialTheme.typography.titleMedium)

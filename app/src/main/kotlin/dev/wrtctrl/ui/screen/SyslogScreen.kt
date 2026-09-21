@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -57,9 +58,12 @@ fun SyslogScreen(deviceId: String?, onBack: () -> Unit) {
 
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
-    val filtered = state.lines
-        .filter { level == "all" || it.level == level }
-        .filterMatching(keyword) { listOf(it.text) }
+    // 过滤结果 remember（5s 轮询每次重组都重算）
+    val filtered = remember(state.lines, level, keyword) {
+        state.lines
+            .filter { level == "all" || it.level == level }
+            .filterMatching(keyword) { listOf(it.text) }
+    }
 
     ToolPage(
         title = stringResource(R.string.syslog_title),
@@ -127,23 +131,25 @@ fun SyslogScreen(deviceId: String?, onBack: () -> Unit) {
                             Toast.makeText(context, context.getString(R.string.syslog_copied), Toast.LENGTH_SHORT).show()
                         }) { Text(stringResource(R.string.syslog_copy)) }
                     }
-                    LogList(filtered)
+                    // weight(1f) 撑满剩余高度（固定 480dp 在矮屏/横屏溢出）
+                    LogList(filtered, Modifier.weight(1f))
                 }
             }
         }
     }
 }
 
-/** 日志列表：monospace + 级别着色；数据更新自动滚底 */
+/** 日志列表：monospace + 级别着色；数据更新自动滚底。
+ *  高度由调用方给定（weight 撑满剩余空间），不再固定 480dp。 */
 @Composable
-private fun LogList(lines: List<LogLineUi>) {
+private fun LogList(lines: List<LogLineUi>, modifier: Modifier = Modifier) {
     val listState = rememberLazyListState()
     LaunchedEffect(lines.size) {
         if (lines.isNotEmpty()) listState.scrollToItem(lines.lastIndex)
     }
-    Card(Modifier.fillMaxWidth()) {
+    Card(modifier.fillMaxWidth()) {
         LazyColumn(
-            Modifier.fillMaxWidth().height(480.dp).padding(8.dp),
+            Modifier.fillMaxSize().padding(8.dp),
             state = listState,
         ) {
             items(lines.size) { i ->

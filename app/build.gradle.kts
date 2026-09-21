@@ -100,7 +100,9 @@ android {
     }
 }
 
-// 经 cargo-ndk 构建 Rust core 为 cdylib，产物输出到 jniLibs
+// 经 cargo-ndk 构建 Rust core 为 cdylib，产物输出到 jniLibs。
+// 声明 inputs/outputs 让 Gradle 增量判断生效：crate 源未变时跳过 cargo-ndk 调用
+// （此前每次 preBuild 都无条件 spawn）
 tasks.register<Exec>("buildRustLibs") {
     workingDir = rootDir
     environment("ANDROID_NDK_HOME", System.getenv("ANDROID_NDK_HOME") ?: "${sdkDir}/ndk/${ndkVersionUsed}")
@@ -111,6 +113,12 @@ tasks.register<Exec>("buildRustLibs") {
         "-o", "${projectDir}/src/main/jniLibs",
         "build", "--release", "-p", "wrtctrl-jni",
     )
+    inputs.dir("${rootDir}/crates")
+    inputs.file("${rootDir}/Cargo.toml")
+    if (file("${rootDir}/Cargo.lock").exists()) {
+        inputs.file("${rootDir}/Cargo.lock")
+    }
+    outputs.dir("${projectDir}/src/main/jniLibs")
 }
 
 tasks.named("preBuild") { dependsOn("buildRustLibs") }

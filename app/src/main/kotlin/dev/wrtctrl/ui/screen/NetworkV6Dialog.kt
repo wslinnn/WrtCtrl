@@ -55,7 +55,8 @@ internal fun V6DetailDialog(title: String, sections: List<Pair<String, List<Stri
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    items.forEach { CopyableRow(section, it) }
+                    // 行不再重复节名（compact 空标签 = 值占满行宽）：节名只作分组标题
+                    items.forEach { CopyableRow("", it, compact = true) }
                 }
             }
         },

@@ -4,6 +4,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -41,37 +42,40 @@ fun WrtTheme(
     seedColor: Color? = null,
     content: @Composable () -> Unit,
 ) {
-    val seed = seedColor ?: Color(0xFF0E84B5)
-    // Vibrant = 提饱和风格；isAmoled 无默认值需显式传
-    val vibrant = dynamicColorScheme(
-        seedColor = seed,
-        isDark = darkTheme,
-        isAmoled = false,
-        style = PaletteStyle.Vibrant,
-    )
-    // 中性表面（与 一致）：蓝灰彩底 → 中性灰；文本角色保留 Vibrant（对比度实测达标）
-    val colorScheme = if (darkTheme) {
-        vibrant.copy(
-            background = Color(0xFF191C1E),
-            surface = Color(0xFF191C1E),
-            surfaceContainerLowest = Color(0xFF14171A),
-            surfaceContainerLow = Color(0xFF1D2022),
-            surfaceContainer = Color(0xFF282A2C),
-            surfaceContainerHigh = Color(0xFF333537),
-            surfaceContainerHighest = Color(0xFF333537),
-            surfaceVariant = Color(0xFF282A2C),
+    // 色板 remember（标准做法；根组合重组频率极低，防御性收敛派生成本）
+    val colorScheme = remember(darkTheme, seedColor) {
+        val seed = seedColor ?: Color(0xFF0E84B5)
+        // Vibrant = 提饱和风格；isAmoled 无默认值需显式传
+        val vibrant = dynamicColorScheme(
+            seedColor = seed,
+            isDark = darkTheme,
+            isAmoled = false,
+            style = PaletteStyle.Vibrant,
         )
-    } else {
-        vibrant.copy(
-            background = Color(0xFFFBFCFF),
-            surface = Color(0xFFFBFCFF),
-            surfaceContainerLowest = Color(0xFFFFFFFF),
-            surfaceContainerLow = Color(0xFFF3F3F6),
-            surfaceContainer = Color(0xFFEDEEF0),
-            surfaceContainerHigh = Color(0xFFE2E2E5),
-            surfaceContainerHighest = Color(0xFFE2E2E5),
-            surfaceVariant = Color(0xFFEDEEF0),
-        )
+        // 中性表面（与 一致）：蓝灰彩底 → 中性灰；文本角色保留 Vibrant（对比度实测达标）
+        if (darkTheme) {
+            vibrant.copy(
+                background = Color(0xFF191C1E),
+                surface = Color(0xFF191C1E),
+                surfaceContainerLowest = Color(0xFF14171A),
+                surfaceContainerLow = Color(0xFF1D2022),
+                surfaceContainer = Color(0xFF282A2C),
+                surfaceContainerHigh = Color(0xFF333537),
+                surfaceContainerHighest = Color(0xFF333537),
+                surfaceVariant = Color(0xFF282A2C),
+            )
+        } else {
+            vibrant.copy(
+                background = Color(0xFFFBFCFF),
+                surface = Color(0xFFFBFCFF),
+                surfaceContainerLowest = Color(0xFFFFFFFF),
+                surfaceContainerLow = Color(0xFFF3F3F6),
+                surfaceContainer = Color(0xFFEDEEF0),
+                surfaceContainerHigh = Color(0xFFE2E2E5),
+                surfaceContainerHighest = Color(0xFFE2E2E5),
+                surfaceVariant = Color(0xFFEDEEF0),
+            )
+        }
     }
 
     MaterialTheme(

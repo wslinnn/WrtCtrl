@@ -59,7 +59,9 @@ fun ProcessScreen(deviceId: String?, onBack: () -> Unit) {
     ) {
         Column(Modifier.fillMaxSize()) {
             ToolCard {
-                ToolSearchField(search, stringResource(R.string.conntrack_search)) { search = it }
+                // 独立提示键：过滤字段是 name/pid/user/command，此前复用 conntrack 的
+                // 「搜索 IP/协议/端口」按提示输入永远搜不到
+                ToolSearchField(search, stringResource(R.string.process_search)) { search = it }
                 Spacer(Modifier.height(8.dp))
                 AutoRefreshRow(state.autoRefresh, vm::setAutoRefresh)
             }

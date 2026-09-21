@@ -117,4 +117,8 @@
     <string name="wifi_secret_failed">Failed to load password</string>
     <string name="wifi_secret_retry">Retry</string>
     <string name="wifi_ssid_label">SSID</string>
+    <!-- Process page dedicated search hint (previously reused conntrack_search "IP/protocol/port", mismatching actual filter fields name/pid/user/command) -->
+    <string name="process_search">Search name/PID/user/command</string>
+    <!-- Unified back arrow a11y key (was inconsistent "Cancel"/null) -->
+    <string name="common_back">Back</string>
 </resources>
