@@ -60,31 +60,20 @@ object AppRegistry {
         AppItem("autoreboot", AppGroupId.SYSTEM, "autoreboot", R.string.autoreboot_title, "Schedule", descRes = R.string.desc_autoreboot),
     )
 
-    /** 全部需要探测的 config 名（并行 uci get 的清单，去重保序） */
+    /** 探测用 config 名全集（并行 uci get 的清单，去重保序） */
     val probeConfigs: List<String> =
         (tools + plugins).mapNotNull { it.probeConfig }.distinct()
 
-    /**
-     * 可见项分组（纯函数，单测覆盖）：插件 fixed（probeConfig=null）恒显，否则
-     * installed[config]==true 才显；tools 恒显；空组不出现。
-     * 组序 = 并3（UI 改版 P3）：插件组前置主视觉，维护工具组降权收后。
-     */
-    fun visibleGroups(installed: Map<String, Boolean>): List<Pair<AppGroupId, List<AppItem>>> =
-        listOf(AppGroupId.NETWORK, AppGroupId.STORAGE, AppGroupId.SYSTEM, AppGroupId.TOOLS).mapNotNull { group ->
-            val apps = (tools + plugins)
-                .filter { it.group == group }
-                .filter { it.probeConfig == null || installed[it.probeConfig] == true }
-            if (apps.isEmpty()) null else group to apps
-        }
+    /** 可见性：插件 fixed（probeConfig=null）恒显，否则 installed[config]==true 才显；
+     *  tools 恒显（唯一实现，单测直接覆盖生产路径） */
+    private fun visible(installed: Map<String, Boolean>, items: List<AppItem>) =
+        items.filter { it.probeConfig == null || installed[it.probeConfig] == true }
 
     /**
      * 页面两段结构：第一段 = 全部 luci 插件（跳外部网页，组内原序 NETWORK→
      * STORAGE→SYSTEM），第二段 = 全部原生工具（app 内屏）——四分组降为 AppGroupId 内部
-     * 归类依据，不再各自出 sechead。可见性规则与 visibleGroups 一致。
+     * 归类依据，不再各自出 sechead。
      */
     fun visibleSections(installed: Map<String, Boolean>): Pair<List<AppItem>, List<AppItem>> =
         visible(installed, plugins) to visible(installed, tools)
-
-    private fun visible(installed: Map<String, Boolean>, items: List<AppItem>) =
-        items.filter { it.probeConfig == null || installed[it.probeConfig] == true }
 }

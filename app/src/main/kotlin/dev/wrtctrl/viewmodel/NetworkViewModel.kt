@@ -86,7 +86,9 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    /** 设备切换失效重拉：单屏后无线一并失效重拉；同设备重复进入不重拉 */
+    /** 设备切换失效重拉：单屏后无线一并失效重拉；同设备重复进入不重拉。
+     *  接口/设备组一并清空回 loading 过渡态——与 ClientViewModel 全量重置同口径，
+     *  否则切设备后短暂显示旧设备的接口卡 */
     fun ensureLoaded(deviceId: String?) {
         if (deviceId != loadedDeviceId) {
             loadedDeviceId = deviceId
@@ -94,6 +96,9 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
             wanDevice = null
             _state.update {
                 it.copy(
+                    loading = true,
+                    ifaces = emptyList(),
+                    deviceGroups = emptyList(),
                     radios = emptyList(),
                     wirelessLoaded = false,
                     wirelessFailed = false,

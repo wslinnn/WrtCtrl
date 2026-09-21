@@ -145,9 +145,11 @@ class StatisticsViewModel(application: Application) : AndroidViewModel(applicati
 
     private suspend fun fetchLoad(gen: Int = generation) {
         try {
+            // 调用失败静默保留旧曲线（与 fetchBandwidth 同语义：
+            // 此前 `?: emptyList()` 会把瞬时失败当「成功但无样本」清空负载图）
             val payload = ubusSafe("luci", "getRealtimeStats", JSONObject().put("mode", "load"))
-                ?.optJSONArray("result")
-            val rows = payload?.let(StatisticsParsers::loadRows) ?: emptyList()
+                ?.optJSONArray("result") ?: return
+            val rows = StatisticsParsers.loadRows(payload)
             if (gen != generation) return
             // 墙钟锚定同带宽：最后采样 ≈ 本次拉取时刻（ts 语义随固件而异）
             val shift = System.currentTimeMillis() / 1000 - (rows.lastOrNull()?.ts ?: 0L)

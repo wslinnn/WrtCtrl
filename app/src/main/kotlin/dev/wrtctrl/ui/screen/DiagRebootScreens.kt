@@ -1,6 +1,7 @@
 package dev.wrtctrl.ui.screen
 
 import android.app.Application
+import android.os.SystemClock
 import android.widget.Toast
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,6 +31,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -47,6 +49,10 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import kotlinx.coroutines.delay
 import dev.wrtctrl.R
 import dev.wrtctrl.viewmodel.DiagViewModel
+import dev.wrtctrl.viewmodel.RebootViewModel
+
+/** 重启等待倒计时总时长（秒）：与 RebootViewModel 的 REBOOT_COUNTDOWN_MS 对齐 */
+private const val REBOOT_TOTAL_SEC = 60
 
 /** 诊断页：ping/traceroute/nslookup 分段 + 目标 + 次数/跳数 + 结果 monospace + 复制 */
 @Composable
@@ -170,26 +176,32 @@ fun DiagScreen(onBack: () -> Unit) {
     }
 }
 
-/** 重启页：确认弹窗 → 执行（断连错误属预期）→ 60s 倒计时 → 回门控列表 */
+/** 重启页：确认弹窗 → 执行（断连错误属预期）→ 60s 倒计时 → 回门控列表。
+ *  倒计时 deadline 在 VM：旋转/切主题重建据 deadline 续算不重置，
+ *  到点回设备列表由 VM 级事件驱动——离开页面计时照走，不再依赖组合存活。 */
 @Composable
 fun RebootScreen(onBack: () -> Unit, onSessionLost: () -> Unit) {
     val app = LocalContext.current.applicationContext as Application
-    val vm: dev.wrtctrl.viewmodel.RebootViewModel =
-        viewModel(factory = viewModelFactory { initializer { dev.wrtctrl.viewmodel.RebootViewModel(app) } })
+    val vm: RebootViewModel =
+        viewModel(factory = viewModelFactory { initializer { RebootViewModel(app) } })
     val state by vm.state.collectAsStateWithLifecycle()
     var confirming by rememberSaveable { mutableStateOf(false) }
-    var remain by rememberSaveable { mutableIntStateOf(60) }
+    // 剩余秒数：从 VM 的 deadline 续算（deadline 变更即重启，重算起点）
+    val deadline = state.deadlineElapsed
+    var remainSec by remember(deadline) { mutableIntStateOf(REBOOT_TOTAL_SEC) }
 
-    // 倒计时走完 → 会话已死，回设备列表（旧 reLaunch device_list 语义）
-    LaunchedEffect(state.rebooting) {
-        if (state.rebooting) {
-            remain = 60
-            while (remain > 0) {
-                delay(1000)
-                remain--
-            }
-            onSessionLost()
+    LaunchedEffect(deadline) {
+        val d = deadline ?: return@LaunchedEffect
+        while (true) {
+            val remainMs = d - SystemClock.elapsedRealtime()
+            remainSec = ((remainMs + 999) / 1000).toInt().coerceAtLeast(0)
+            if (remainMs <= 0) break
+            delay(1000)
         }
+    }
+    // 倒计时走完 → 会话已死，回设备列表（VM 级一次性事件）
+    LaunchedEffect(Unit) {
+        vm.rebootCountdownDone.collect { onSessionLost() }
     }
 
     ToolPage(title = stringResource(R.string.reboot_title), onBack = onBack) {
@@ -216,12 +228,12 @@ fun RebootScreen(onBack: () -> Unit, onSessionLost: () -> Unit) {
                 )
                 Spacer(Modifier.height(8.dp))
                 LinearProgressIndicator(
-                    progress = { (60 - remain) / 60f },
+                    progress = { (REBOOT_TOTAL_SEC - remainSec) / REBOOT_TOTAL_SEC.toFloat() },
                     Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    stringResource(R.string.reboot_please_wait) + " ${remain}s",
+                    stringResource(R.string.reboot_please_wait) + " ${remainSec}s",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

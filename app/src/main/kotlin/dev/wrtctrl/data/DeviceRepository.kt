@@ -5,9 +5,11 @@ import android.util.Log
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import java.util.UUID
 
@@ -21,13 +23,16 @@ private val Context.dataStore by preferencesDataStore(name = "wrtctrl")
  *
  * 健壮性：解析失败按空数据处理 + logcat（tag=wrtctrl），绝不让启动路径 boot() 崩溃——
  * 存储损坏时用户可重新添加设备，而不是闪退无出口。
+ * 原子性：写操作收敛为单次 edit 事务——读改写在 DataStore
+ * 的串行 actor 上完成，并发 add/update 不再互相丢更新；Keystore 加解密随之
+ * 离开调用方线程（此前可能在 Main）。
  */
 class DeviceRepository(private val context: Context) {
 
     suspend fun list(): List<Device> = try {
-        val json = context.dataStore.data.first()[DEVICES_KEY] ?: return emptyList()
-        val array = JSONArray(json)
-        (0 until array.length()).map { Device.fromJson(array.getJSONObject(it)) }
+        withContext(Dispatchers.IO) {
+            context.dataStore.data.first()[DEVICES_KEY]?.let(::decode) ?: emptyList()
+        }
     } catch (e: kotlinx.coroutines.CancellationException) {
         throw e
     } catch (e: Exception) {
@@ -52,17 +57,26 @@ class DeviceRepository(private val context: Context) {
             username = username,
             password = password,
         )
-        save(list() + device)
+        upsert { it + device }
         return device
     }
 
     suspend fun update(device: Device) {
-        save(list().map { if (it.id == device.id) device else it })
+        upsert { list -> list.map { if (it.id == device.id) device else it } }
     }
 
     suspend fun delete(id: String) {
-        save(list().filterNot { it.id == id })
-        if (currentId() == id) setCurrent(null)
+        // 删设备与清当前指针同一事务，不留「设备已删、current 还指着」的中间态
+        context.dataStore.edit { prefs ->
+            val devices = try {
+                prefs[DEVICES_KEY]?.let(::decode) ?: emptyList()
+            } catch (e: Exception) {
+                Log.w("wrtctrl", "device store unreadable while deleting: ${e.message}")
+                emptyList()
+            }
+            prefs[DEVICES_KEY] = encode(devices.filterNot { it.id == id })
+            if (prefs[CURRENT_KEY] == id) prefs[CURRENT_KEY] = ""
+        }
     }
 
     suspend fun get(id: String): Device? = list().find { it.id == id }
@@ -83,18 +97,35 @@ class DeviceRepository(private val context: Context) {
         }
     }
 
-    suspend fun current(): Device? = currentFlow().first()
+    suspend fun current(): Device? = withContext(Dispatchers.IO) { currentFlow().first() }
 
     suspend fun setCurrent(id: String?) {
         context.dataStore.edit { prefs -> prefs[CURRENT_KEY] = id ?: "" }
     }
 
-    private suspend fun currentId(): String = context.dataStore.data.first()[CURRENT_KEY] ?: ""
+    /** 读-改-写单事务：transform 在 DataStore 串行 actor 上执行（加密同线程） */
+    private suspend fun upsert(transform: (List<Device>) -> List<Device>) {
+        context.dataStore.edit { prefs ->
+            val devices = try {
+                prefs[DEVICES_KEY]?.let(::decode) ?: emptyList()
+            } catch (e: Exception) {
+                Log.w("wrtctrl", "device store unreadable, treating as empty: ${e.message}")
+                emptyList()
+            }
+            prefs[DEVICES_KEY] = encode(transform(devices))
+        }
+    }
 
-    private suspend fun save(devices: List<Device>) {
+    /** JSON → 设备列表（损坏抛错，由调用方按空表降级 */
+    private fun decode(json: String): List<Device> {
+        val array = JSONArray(json)
+        return (0 until array.length()).map { Device.fromJson(array.getJSONObject(it)) }
+    }
+
+    private fun encode(devices: List<Device>): String {
         val array = JSONArray()
         devices.forEach { array.put(it.toJson()) }
-        context.dataStore.edit { prefs -> prefs[DEVICES_KEY] = array.toString() }
+        return array.toString()
     }
 
     companion object {

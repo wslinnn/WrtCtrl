@@ -117,7 +117,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 delay(POLL_INTERVAL)
                 if (pollingActive.value) {
                     slowTick = (slowTick + 1) % SLOW_EVERY
-                    pollOnce(slow = slowTick == 0)
+                    // 循环级兜底：任何一轮的非取消异常（如畸形响应触发解析抛错）
+                    // 都不允许杀死轮询协程——否则首页从此静默停更
+                    try {
+                        pollOnce(slow = slowTick == 0)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        android.util.Log.w("wrtctrl", "home poll failed: ${e.message}")
+                    }
                 }
             }
         }
@@ -269,7 +277,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val samples = payload.optJSONArray("result") ?: return
-        val series = bandwidthRates(samples)
+        // 差分解析单独包护：畸形样本行（非数组元素）抛 JSONException 不得外溢——
+        // 外层轮询循环虽有兜底，但那会让本轮 board/info 等已到手的更新一起作废
+        val series = try {
+            bandwidthRates(samples)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w("wrtctrl", "bandwidth parse failed: ${e.message}")
+            return
+        }
         if (series.timestamps.isEmpty()) return
         var rx = series.rx; var tx = series.tx; var ts = series.timestamps
         if (rx.size > 60) {

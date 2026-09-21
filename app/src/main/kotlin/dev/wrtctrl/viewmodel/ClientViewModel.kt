@@ -142,7 +142,9 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** 下拉刷新：无线 + 租约 + 静态表全量重拉，指示器总时长 = max(数据落地, 400ms) */
+    /** 下拉刷新：无线 + 租约 + 静态表全量重拉，指示器总时长 = max(数据落地, 400ms)。
+     *  只走一次 loadWirelessNow（内部已含租约重拉）——不再叠加 refreshDhcp 双拉
+     *  getDHCPLeases */
     fun refresh() {
         if (_state.value.refreshing) return
         viewModelScope.launch {
@@ -151,7 +153,6 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
             dhcpCache = null
             staticHostsCache = null
             loadWirelessNow(showLoading = false)
-            refreshDhcp()
             holdRefreshSpin(startedAt)
             _state.update { it.copy(refreshing = false) }
         }
@@ -275,6 +276,18 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
             _state.update { it.copy(busyMac = mac) }
             try {
                 if (block) {
+                    // 写前强一致回读：本地集合为空可能是「拉取失败」而非「真无规则」——
+                    // 此时盲加会造出重复 block_ 规则（重复规则在折叠 map 里只显一条，
+                    // 另一条 app 永远删不掉）
+                    val known = _state.value.blockedMacs.ifEmpty { ensureBlocked(gen) ?: emptyMap() }
+                    if (mac in known) {
+                        if (gen == generation) {
+                            _state.update { it.copy(blockedMacs = known, busyMac = null) }
+                        } else {
+                            _state.update { it.copy(busyMac = null) }
+                        }
+                        return@launch
+                    }
                     val section = WrtCore.uciAdd("firewall", "rule")
                     WrtCore.uciSet(
                         "firewall",
@@ -328,9 +341,20 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
         if (_state.value.busyMac != null || _state.value.staticHosts.any { it.mac == mac }) return
         viewModelScope.launch {
             val gen = generation
-            _state.update { it.copy(busyMac = mac.lowercase()) }
-            try {
-                val section = WrtCore.uciAdd("dhcp", "host")
+        _state.update { it.copy(busyMac = mac.lowercase()) }
+        try {
+            // 写前强一致回读（同 toggleBlock）：静态表拉取失败时空列表不等于「未绑定」，
+            // 盲加会造出同 MAC 的重复 @host
+            val known = _state.value.staticHosts.ifEmpty { ensureStatic(gen) ?: emptyList() }
+            if (known.any { it.mac == mac }) {
+                if (gen == generation) {
+                    _state.update { it.copy(staticHosts = known, busyMac = null) }
+                } else {
+                    _state.update { it.copy(busyMac = null) }
+                }
+                return@launch
+            }
+            val section = WrtCore.uciAdd("dhcp", "host")
                 WrtCore.uciSet(
                     "dhcp",
                     section,
@@ -342,9 +366,14 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
                 )
                 WrtCore.uciCommit("dhcp")
                 staticHostsCache = null
+                // 乐观更新按 section 幂等 upsert（历史崩溃修复）：uciAdd 返回后
+                // 新 section 即已存在于设备 staging，写窗口内轮询若真拉设备会把含新 section
+                // 的列表先落进 state——盲追加会产生重复 key（LazyColumn 崩溃）；先剔后加保证
+                // 无论轮询怎么交错都不重复（拉黑路径是 Map 按 mac put，天然幂等）
                 finishWrite(gen) { current ->
                     current.copy(
-                        staticHosts = (current.staticHosts + StaticHost(section, mac, name?.takeIf(String::isNotBlank), ip))
+                        staticHosts = (current.staticHosts.filterNot { it.section == section } +
+                            StaticHost(section, mac, name?.takeIf(String::isNotBlank), ip))
                             .sortedBy { it.mac },
                     )
                 }

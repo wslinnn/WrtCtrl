@@ -31,6 +31,8 @@ class RouteViewModel(application: Application) : AndroidViewModel(application) {
 
     private var loadedDeviceId: String? = null
     private var generation = 0
+    /** 在飞互斥（与轮询工具页同语义）：首载进行中下拉刷新不并发双跑 */
+    private var busy = false
 
     fun ensureLoaded(deviceId: String?) {
         if (deviceId == loadedDeviceId) return
@@ -46,7 +48,7 @@ class RouteViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 下拉刷新（总时长 = max(拉取, 400ms)） */
     fun refresh() {
-        if (_state.value.refreshing) return
+        if (busy || _state.value.refreshing) return
         viewModelScope.launch {
             _state.update { it.copy(refreshing = true) }
             val startedAt = android.os.SystemClock.elapsedRealtime()
@@ -57,9 +59,10 @@ class RouteViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun loadNow() {
+        busy = true
         val gen = generation
-        _state.update { it.copy(errorRes = null) }
         try {
+            _state.update { it.copy(errorRes = null) }
             // 双族并发；IPv6 失败（无 IPv6/ACL）容错不阻断 IPv4
             val r4 = execAsync("/sbin/ip", listOf("-4", "route", "show", "table", "all"))
             val r6 = try {
@@ -83,6 +86,8 @@ class RouteViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: Exception) {
             android.util.Log.w("wrtctrl", "route table load failed: ${e.message}")
             if (gen == generation) _state.update { it.copy(loading = false, errorRes = R.string.route_load_failed) }
+        } finally {
+            busy = false
         }
     }
 
@@ -112,6 +117,8 @@ class StartupViewModel(application: Application) : AndroidViewModel(application)
 
     private var loadedDeviceId: String? = null
     private var generation = 0
+    /** 在飞互斥（与轮询工具页同语义）：首载进行中下拉刷新不并发双跑 */
+    private var busy = false
 
     fun ensureLoaded(deviceId: String?) {
         if (deviceId == loadedDeviceId) return
@@ -126,7 +133,7 @@ class StartupViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun refresh() {
-        if (_state.value.refreshing) return
+        if (busy || _state.value.refreshing) return
         viewModelScope.launch {
             _state.update { it.copy(refreshing = true) }
             val startedAt = android.os.SystemClock.elapsedRealtime()
@@ -137,6 +144,7 @@ class StartupViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private suspend fun loadNow() {
+        busy = true
         val gen = generation
         try {
             val data = withContext(Dispatchers.IO) { WrtCore.callUbus("rc", "list") }
@@ -149,6 +157,8 @@ class StartupViewModel(application: Application) : AndroidViewModel(application)
         } catch (e: Exception) {
             android.util.Log.w("wrtctrl", "startup list load failed: ${e.message}")
             if (gen == generation) _state.update { it.copy(loading = false, loadFailed = true) }
+        } finally {
+            busy = false
         }
     }
 }

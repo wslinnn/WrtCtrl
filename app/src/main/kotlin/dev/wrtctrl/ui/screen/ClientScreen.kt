@@ -792,7 +792,9 @@ private fun blockableLease(
                     onRequestWrite(action, lease.macaddr ?: norm, lease.hostname ?: lease.macaddr ?: norm, null)
                 }
             },
-            onBindStatic = if (!staticBound) {
+            // 无 MAC（v6 DUID-only）不显任何写动作：绑定静态租约以 MAC 为主键，
+            // 空 MAC 会写出无效的 uci @host
+            onBindStatic = if (macUpper != null && !staticBound) {
                 {
                     onRequestWrite("bindStatic", lease.macaddr ?: "", lease.hostname, lease.ip)
                 }

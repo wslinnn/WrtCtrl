@@ -137,6 +137,9 @@ class SyslogViewModel(application: Application) : AndroidViewModel(application) 
 
     private var loadedDeviceId: String? = null
     private var generation = 0
+    /** 源代次：切 syslog↔dmesg 递增，在飞的旧源响应按此丢弃——generation 只管切设备，
+     *  切源必须独立代次（旧源大文件慢返回会覆盖新源内容） */
+    private var sourceGen = 0
     private val visible = MutableStateFlow(false)
     private val polling = MutableStateFlow(false)
     private var busy = false
@@ -145,6 +148,7 @@ class SyslogViewModel(application: Application) : AndroidViewModel(application) 
         if (deviceId == loadedDeviceId) return
         loadedDeviceId = deviceId
         generation++
+        sourceGen++
         _state.value = SyslogUiState()
         load()
     }
@@ -159,9 +163,11 @@ class SyslogViewModel(application: Application) : AndroidViewModel(application) 
         polling.value = v && visible.value
     }
 
-    /** 切源：清列表立即拉（fetch 用切换后的源；busy 由调用时序天然规避——切源时旧请求结果按 gen 丢弃） */
+    /** 切源：清列表立即拉。与在飞旧源请求并发安全：loadNow 启动时快照 source 与
+     *  sourceGen，完成回写前校验——后启动的请求代次更新，旧源结果一律丢弃 */
     fun setSource(source: String) {
         if (_state.value.source == source) return
+        sourceGen++
         _state.update { it.copy(source = source, lines = emptyList(), loadFailed = false) }
         load()
     }
@@ -195,12 +201,14 @@ class SyslogViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun loadNow() {
         busy = true
         val gen = generation
+        val sgen = sourceGen
         val source = _state.value.source
         try {
             val arr = withContext(Dispatchers.IO) {
                 if (source == "syslog") WrtCore.readSyslog() else WrtCore.readDmesg()
             }
-            if (gen != generation) return
+            // 双代次校验：切设备（generation）或切源（sourceGen）后的旧响应一律丢弃
+            if (gen != generation || sgen != sourceGen) return
             _state.update {
                 it.copy(loading = false, loadFailed = false, lines = ToolParsers.parseLogLines(arr))
             }
@@ -208,7 +216,9 @@ class SyslogViewModel(application: Application) : AndroidViewModel(application) 
             throw e
         } catch (e: Exception) {
             android.util.Log.w("wrtctrl", "syslog load failed: ${e.message}")
-            if (gen == generation) _state.update { it.copy(loading = false, loadFailed = true) }
+            if (gen == generation && sgen == sourceGen) {
+                _state.update { it.copy(loading = false, loadFailed = true) }
+            }
         } finally {
             busy = false
         }
@@ -243,6 +253,8 @@ class ConntrackViewModel(application: Application) : AndroidViewModel(applicatio
     private var loadedDeviceId: String? = null
     private var generation = 0
     private var dnsSeq = 0
+    /** DNS 反查单飞互斥（查询超时上限 > 轮询周期，重叠会反复作废在飞查询） */
+    private var dnsBusy = false
     private val visible = MutableStateFlow(false)
     private val polling = MutableStateFlow(false)
     private var busy = false
@@ -251,6 +263,7 @@ class ConntrackViewModel(application: Application) : AndroidViewModel(applicatio
         if (deviceId == loadedDeviceId) return
         loadedDeviceId = deviceId
         generation++
+        dnsSeq++ // 作废旧设备在飞的反查（dnsCache 合并前还会做 generation 校验，双保险）
         _state.value = ConntrackUiState()
         load()
     }
@@ -331,42 +344,64 @@ class ConntrackViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    /** DNS 反查：增量查未缓存 IP（前 100 条连接的端点、单轮上限 100）；
-     *  失败回落 IP 原样；dnsSeq 丢弃过期轮次。异步执行不阻塞列表渲染。 */
+    /**
+     * DNS 反查：增量查未缓存 IP（前 100 条连接的端点、单轮上限 100）；
+     * 失败回落 IP 原样；异步执行不阻塞列表渲染。
+     * 三重守卫：dnsBusy 互斥（单轮查询超时上限 5.5s > 5s 轮询，
+     * 不互斥会反复作废在飞查询）；dnsSeq 丢弃过期轮次；generation 校验保证
+     * 旧设备结果不并入新设备缓存。缓存有上限（conntrack 长期翻动会无界膨胀）。
+     */
     private fun refreshDns() {
-        if (!_state.value.dnsEnabled) return
+        if (!_state.value.dnsEnabled || dnsBusy) return
         val seq = ++dnsSeq
+        val gen = generation
+        dnsBusy = true
         viewModelScope.launch {
-            val ips = _state.value.rows.take(DNS_LIMIT)
-                .flatMap { sequenceOf(it.src, it.dst) }
-                .filter { it.isNotBlank() }
-                .distinct()
-            val todo = ips.filterNot { _state.value.dnsCache.containsKey(it) }.take(DNS_LIMIT)
-            if (todo.isEmpty()) return@launch
-            val map = try {
-                withContext(Dispatchers.IO) {
-                    val addrs = JSONArray().apply { todo.forEach { put(it) } }
-                    WrtCore.callUbus(
-                        "network.rrdns",
-                        "lookup",
-                        JSONObject().put("addrs", addrs).put("timeout", DNS_TIMEOUT_MS).put("limit", DNS_LIMIT),
-                        DNS_TIMEOUT_MS + 3000,
-                    )
-                }.let(ToolParsers::parseRrdns)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                android.util.Log.w("wrtctrl", "rrdns lookup failed: ${e.message}")
-                return@launch
+            try {
+                val ips = _state.value.rows.take(DNS_LIMIT)
+                    .flatMap { sequenceOf(it.src, it.dst) }
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                val todo = ips.filterNot { _state.value.dnsCache.containsKey(it) }.take(DNS_LIMIT)
+                if (todo.isEmpty()) return@launch
+                val map = try {
+                    withContext(Dispatchers.IO) {
+                        val addrs = JSONArray().apply { todo.forEach { put(it) } }
+                        WrtCore.callUbus(
+                            "network.rrdns",
+                            "lookup",
+                            JSONObject().put("addrs", addrs).put("timeout", DNS_TIMEOUT_MS).put("limit", DNS_LIMIT),
+                            DNS_TIMEOUT_MS + 3000,
+                        )
+                    }.let(ToolParsers::parseRrdns)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    android.util.Log.w("wrtctrl", "rrdns lookup failed: ${e.message}")
+                    return@launch
+                }
+                if (seq != dnsSeq || gen != generation || map.isEmpty()) return@launch
+                _state.update { it.copy(dnsCache = cappedCache(it.dnsCache + map)) }
+            } finally {
+                dnsBusy = false
             }
-            if (seq != dnsSeq || map.isEmpty()) return@launch
-            _state.update { it.copy(dnsCache = it.dnsCache + map) }
         }
+    }
+
+    /** 缓存上限：超出时按合入序丢弃最早条目（LinkedHashMap 序） */
+    private fun cappedCache(cache: Map<String, String>): Map<String, String> {
+        if (cache.size <= DNS_CACHE_MAX) return cache
+        val trimmed = LinkedHashMap<String, String>(DNS_CACHE_MAX)
+        cache.entries.drop(cache.size - DNS_CACHE_MAX).forEach { (k, v) -> trimmed[k] = v }
+        return trimmed
     }
 
     private companion object {
         const val POLL_INTERVAL = 5000L
         const val DNS_LIMIT = 100
         const val DNS_TIMEOUT_MS = 2500
+
+        /** DNS 反查缓存上限（单设备会话内） */
+        const val DNS_CACHE_MAX = 512
     }
 }

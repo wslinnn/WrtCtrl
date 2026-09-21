@@ -47,7 +47,7 @@ class AppsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refresh() {
-        // 首载探测进行中不叠加刷新：probe 无互斥，双跑 = 8 路 uciGet 翻倍
+        // 首载探测进行中不叠加刷新：probe 无互斥，双跑 = 7 路 uciGet 翻倍
         if (_state.value.loading || _state.value.refreshing) return
         viewModelScope.launch {
             _state.update { it.copy(refreshing = true) }
@@ -58,7 +58,7 @@ class AppsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 8 路（去重后）并行探测：单路失败=false，整体异常=空 map */
+    /** 7 路（去重后）并行探测：单路失败=false，整体异常=空 map */
     private fun probe() {
         viewModelScope.launch {
             val gen = generation

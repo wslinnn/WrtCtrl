@@ -5,17 +5,11 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** 应用中心注册表纯函数：可见性判定与分组（对齐 LuCI 应用列表） */
+/** 应用中心注册表纯函数：可见性判定与两段结构（对齐 LuCI 应用列表）。
+ *  全部走生产路径 visibleSections。 */
 class AppRegistryTest {
 
     private val ids: (List<AppItem>) -> List<String> = { list -> list.map { it.id } }
-
-    @Test
-    fun `tools always visible regardless of probe result`() {
-        val groups = AppRegistry.visibleGroups(emptyMap())
-        val tools = groups.first { it.first == AppGroupId.TOOLS }.second
-        assertEquals(listOf("diag", "conntrack", "syslog", "process", "route", "startup", "reboot"), ids(tools))
-    }
 
     @Test
     fun `visibleSections——插件段在前工具段收后、探测过滤、既有行序`() {
@@ -37,46 +31,38 @@ class AppRegistryTest {
     }
 
     @Test
+    fun `tools always visible regardless of probe result`() {
+        val tools = AppRegistry.visibleSections(emptyMap()).second
+        assertEquals(listOf("diag", "conntrack", "syslog", "process", "route", "startup", "reboot"), ids(tools))
+    }
+
+    @Test
     fun `firewall fixed visible without probe`() {
-        val groups = AppRegistry.visibleGroups(emptyMap())
-        val network = groups.first { it.first == AppGroupId.NETWORK }.second
-        assertTrue("firewall".let { id -> ids(network).contains(id) })
+        val plugins = AppRegistry.visibleSections(emptyMap()).first
+        assertTrue(ids(plugins).contains("firewall"))
     }
 
     @Test
     fun `probe failure hides non-fixed plugin`() {
-        val groups = AppRegistry.visibleGroups(mapOf("upnpd" to false))
-        val network = ids(groups.first { it.first == AppGroupId.NETWORK }.second)
-        assertFalse(network.contains("upnp"))
-        assertTrue(network.contains("arpbind").not())
+        val plugins = ids(AppRegistry.visibleSections(mapOf("upnpd" to false)).first)
+        assertFalse(plugins.contains("upnp"))
+        assertFalse(plugins.contains("arpbind"))
     }
 
     @Test
     fun `probe success shows plugin`() {
-        val groups = AppRegistry.visibleGroups(mapOf("upnpd" to true, "samba4" to true))
-        val network = ids(groups.first { it.first == AppGroupId.NETWORK }.second)
-        assertTrue(network.contains("upnp"))
-        val storage = ids(groups.first { it.first == AppGroupId.STORAGE }.second)
-        assertTrue(storage.contains("samba4"))
-        assertFalse(storage.contains("cifs"))
+        val plugins = ids(AppRegistry.visibleSections(mapOf("upnpd" to true, "samba4" to true)).first)
+        assertTrue(plugins.contains("upnp"))
+        assertTrue(plugins.contains("samba4"))
+        assertFalse(plugins.contains("cifs"))
     }
 
     @Test
-    fun `empty group omitted and group order stable`() {
-        // 全部探测失败：只剩 firewall(fixed network) + tools；storage/system 组消失
-        val groups = AppRegistry.visibleGroups(emptyMap())
-        assertEquals(listOf(AppGroupId.NETWORK, AppGroupId.TOOLS), groups.map { it.first })
-    }
-
-    @Test
-    fun `plugin groups before tools (并3 插件前置)`() {
-        // 全部安装：插件组（network→storage→system）在前，维护工具组收后
-        val installed = AppRegistry.probeConfigs.associateWith { true }
-        val order = AppRegistry.visibleGroups(installed).map { it.first }
-        assertEquals(
-            listOf(AppGroupId.NETWORK, AppGroupId.STORAGE, AppGroupId.SYSTEM, AppGroupId.TOOLS),
-            order,
-        )
+    fun `all probes failed leaves only fixed plugin and tools`() {
+        // 全部探测失败：只剩 firewall(fixed) + 全部工具
+        val (plugins, tools) = AppRegistry.visibleSections(emptyMap())
+        assertEquals(listOf("firewall"), ids(plugins))
+        assertEquals(7, tools.size)
     }
 
     @Test
