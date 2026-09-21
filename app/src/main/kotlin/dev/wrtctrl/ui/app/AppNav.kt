@@ -67,6 +67,7 @@ import java.io.File
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.activity.compose.BackHandler
 import dev.wrtctrl.R
 import dev.wrtctrl.data.Device
 import dev.wrtctrl.data.ThemeMode
@@ -199,10 +200,20 @@ private fun MainTabs(vm: AppViewModel) {
     // 状态保留规范：saveable 化后语言/主题切换的 Activity 重建、门控往返
     // 都回到原 Tab 与原覆盖页；各 Tab 内容经 holder 按键保存恢复滚动位置
     var selected by rememberSaveable { mutableIntStateOf(0) }
+    // 跨 Tab 跳转来源（首页卡片：趋势→统计 / 详情→网络 / NAT→应用工具）：>=0 时目标 Tab 的
+    // 返回键弹回来源 Tab，否则不拦截（维持系统行为）；底栏主动切换清除——跳转返回语义只在
+    // 尚未离开跳转目标时有效
+    var returnTab by rememberSaveable { mutableIntStateOf(-1) }
     var showDashboardEdit by rememberSaveable { mutableStateOf(false) }
     // 首页网络卡直达工具（NAT 会话→conntrack、DOWN 接口→诊断）：切到应用 Tab 并带开工具页
     var pendingTool by rememberSaveable { mutableStateOf<String?>(null) }
     val tabHolder = rememberSaveableStateHolder()
+    // 注册顺序在工具页/编辑页 BackHandler 之前——它们开着时优先由其拦截（最内层优先）
+    BackHandler(enabled = returnTab >= 0) {
+        val target = returnTab
+        returnTab = -1
+        if (target in 0..4) selected = target
+    }
     // 设备切换底部弹层（▾ / 顶栏设备图标共用）：连接成功（current 变更）自动收起。
     // saveable：弹层开着时语言/主题切换重建后重开——连接进行中/失败横幅不静默丢失
     var showDeviceSheet by rememberSaveable { mutableStateOf(false) }
@@ -279,7 +290,11 @@ private fun MainTabs(vm: AppViewModel) {
                 TABS.forEachIndexed { index, tab ->
                     NavigationBarItem(
                         selected = selected == index,
-                        onClick = { selected = index },
+                        onClick = {
+                            selected = index
+                            // 主动导航清除跳转来源：返回键语义只服务「跳转后回退」
+                            returnTab = -1
+                        },
                         icon = { Icon(tab.icon, contentDescription = null) },
                         label = { Text(stringResource(tab.labelRes)) },
                     )
@@ -300,9 +315,13 @@ private fun MainTabs(vm: AppViewModel) {
                         tabHolder.SaveableStateProvider(0) {
                             HomeScreen(
                                 homeVm,
-                                onGotoTab = { selected = it },
+                                onGotoTab = {
+                                    returnTab = 0
+                                    selected = it
+                                },
                                 onOpenTool = {
                                     pendingTool = it
+                                    returnTab = 0
                                     selected = 4
                                 },
                                 modifier = Modifier.fillMaxSize(),
@@ -326,6 +345,12 @@ private fun MainTabs(vm: AppViewModel) {
                         pendingToolId = pendingTool,
                         onToolConsumed = { pendingTool = null },
                         onSessionLost = { vm.openDeviceList() },
+                        // 首页直达工具返回 = 撤销整个跳转回来源 Tab；列表打开的工具停在本 Tab
+                        onToolExit = {
+                            val target = returnTab
+                            returnTab = -1
+                            if (target >= 0) selected = target
+                        },
                         modifier = Modifier.fillMaxSize(),
                     )
                 }

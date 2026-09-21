@@ -83,6 +83,8 @@ fun AppsScreen(
     /** 跨 Tab 直达工具（首页网络卡 NAT/诊断入口）：非空且合法时开对应工具页 */
     pendingToolId: String? = null,
     onToolConsumed: () -> Unit = {},
+    /** 首页直达打开的工具页因返回退出时回调（撤销整个跳转回来源 Tab）；应用列表打开的不回调 */
+    onToolExit: () -> Unit = {},
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     LaunchedEffect(deviceId) { vm.ensureLoaded(deviceId) }
@@ -90,6 +92,8 @@ fun AppsScreen(
     val comingSoon = stringResource(R.string.apps_coming_soon)
     // 工具页覆盖：组合级分支，返回键由 ToolPage 自带 BackHandler 兜底，此处仅记 id
     var openToolId by rememberSaveable { mutableStateOf<String?>(null) }
+    // 打开来源：首页直达 = true（返回撤销整个跳转，经 onToolExit 弹回来源 Tab）；列表点击 = false（停在本 Tab）
+    var toolFromShortcut by rememberSaveable { mutableStateOf(false) }
     // 状态保留规范：工具页 ↔ 列表互为覆盖分支，组合销毁会丢
     // LazyVerticalGrid 滚动位置——两分支经 holder 按 key 保存恢复
     val appsHolder = rememberSaveableStateHolder()
@@ -97,6 +101,7 @@ fun AppsScreen(
     LaunchedEffect(pendingToolId) {
         if (pendingToolId != null && isToolId(pendingToolId)) {
             openToolId = pendingToolId
+            toolFromShortcut = true
             onToolConsumed()
         }
     }
@@ -107,7 +112,13 @@ fun AppsScreen(
             ToolRouter(
                 toolId = toolId,
                 deviceId = deviceId,
-                onBack = { openToolId = null },
+                onBack = {
+                    openToolId = null
+                    if (toolFromShortcut) {
+                        toolFromShortcut = false
+                        onToolExit()
+                    }
+                },
                 onSessionLost = onSessionLost,
             )
         }
@@ -152,7 +163,10 @@ fun AppsScreen(
                                 )
                             }
                             item(key = "tools_card", span = { GridItemSpan(maxLineSpan) }) {
-                                ToolsCard(tools) { openToolId = it }
+                                ToolsCard(tools) {
+                                    toolFromShortcut = false
+                                    openToolId = it
+                                }
                             }
                         }
                     }
