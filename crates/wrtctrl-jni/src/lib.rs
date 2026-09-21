@@ -425,6 +425,10 @@ pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_candidatesNative(
             "interfaces" => serde_json::to_value(client.get_interface_candidates().await)?,
             "zones" => serde_json::to_value(client.get_zone_candidates().await)?,
             "printers" => serde_json::to_value(client.get_usb_printers().await)?,
+            // 全量对齐恢复/新增
+            "helpers" => serde_json::to_value(client.get_conntrack_helpers().await)?,
+            "ipsets" => serde_json::to_value(client.get_ipset_candidates().await)?,
+            "ifaddrs" => serde_json::to_value(client.get_ifaddr_candidates().await)?,
             other => {
                 return Err(UbusError::InvalidArgument(format!(
                     "unknown candidates kind: {other}"

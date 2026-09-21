@@ -99,21 +99,41 @@ impl RouterClient {
         hints
     }
 
-    /// luci-rpc getNetworkDevices → 网络设备候选；过滤 lo 与 down 设备
+    /// luci-rpc getNetworkDevices → 网络设备候选；过滤 lo 与 down 设备。
+    /// 兜底：部分固件 luci-rpc 扩展缺失/返回空（同 getWirelessDevices
+    /// 失败先例），回落从 network.interface dump 提取 device/l3_device 设备名。
     pub async fn get_device_candidates(&self) -> Vec<Candidate> {
-        let Ok(payload) = self
+        let mut devices = Vec::new();
+        if let Ok(payload) = self
             .call_ubus("luci-rpc", "getNetworkDevices", json!({}), UCI_CALL_TIMEOUT)
             .await
-        else {
-            return Vec::new();
-        };
-        let mut devices = Vec::new();
-        if let Some(map) = payload.as_object() {
-            for (name, info) in map {
-                if name == "lo" || info.get("up").and_then(|v| v.as_bool()) == Some(false) {
-                    continue;
+        {
+            if let Some(map) = payload.as_object() {
+                for (name, info) in map {
+                    if name == "lo" || info.get("up").and_then(|v| v.as_bool()) == Some(false) {
+                        continue;
+                    }
+                    devices.push(candidate(name.clone(), name.clone()));
                 }
-                devices.push(candidate(name.clone(), name.clone()));
+            }
+        }
+        if devices.is_empty() {
+            if let Ok(dump) = self
+                .call_ubus("network.interface", "dump", json!({}), UCI_CALL_TIMEOUT)
+                .await
+            {
+                if let Some(ifaces) = dump.get("interface").and_then(|v| v.as_array()) {
+                    for iface in ifaces {
+                        for key in ["device", "l3_device"] {
+                            let dev = iface.get(key).and_then(|v| v.as_str());
+                            if let Some(d) = dev {
+                                if d != "lo" && !devices.iter().any(|c| c.value == d) {
+                                    devices.push(candidate(d.to_string(), d.to_string()));
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         devices
@@ -149,6 +169,80 @@ impl RouterClient {
                 candidate(name.to_string(), name.to_string())
             })
             .collect()
+    }
+
+    /// conntrack helper 候选（rule/zone 的 helper 引用下拉）。
+    /// 形状：payload.result[] 内 {name, description}：payload.result[] 内 {name, description}。
+    pub async fn get_conntrack_helpers(&self) -> Vec<Candidate> {
+        let Ok(payload) = self
+            .call_ubus("luci", "getConntrackHelpers", json!({}), UCI_CALL_TIMEOUT)
+            .await
+        else {
+            return Vec::new();
+        };
+        let Some(arr) = payload.get("result").and_then(|v| v.as_array()) else {
+            return Vec::new();
+        };
+        arr.iter()
+            .filter_map(|h| {
+                let name = h.get("name")?.as_str()?;
+                let desc = h.get("description").and_then(|v| v.as_str()).unwrap_or(name);
+                Some(candidate(name.to_string(), format!("{desc} ({name})")))
+            })
+            .collect()
+    }
+
+    /// firewall 中 .type=ipset 的 name 候选（rule/redirect/nat 的「使用 ipset」下拉）
+    pub async fn get_ipset_candidates(&self) -> Vec<Candidate> {
+        let Ok(sections) = self.uci_get("firewall").await else {
+            return Vec::new();
+        };
+        sections
+            .values()
+            .filter(|s| s.section_type == "ipset")
+            .filter_map(|s| {
+                s.options
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(|n| candidate(n.to_string(), n.to_string()))
+            })
+            .collect()
+    }
+
+    /// 接口 IPv4 候选（usb-printer bind：与 LuCI 一致（network_netlist——选接口、写该接口 IP）。
+    /// value=IP（uci bind 落盘值），label=接口名 (IP)。
+    pub async fn get_ifaddr_candidates(&self) -> Vec<Candidate> {
+        let Ok(dump) = self
+            .call_ubus("network.interface", "dump", json!({}), UCI_CALL_TIMEOUT)
+            .await
+        else {
+            return Vec::new();
+        };
+        let Some(ifaces) = dump.get("interface").and_then(|v| v.as_array()) else {
+            return Vec::new();
+        };
+        let mut out: Vec<Candidate> = Vec::new();
+        for iface in ifaces {
+            let name = iface.get("interface").and_then(|v| v.as_str()).unwrap_or("");
+            let Some(addrs) = iface.get("ipv4-address").and_then(|v| v.as_array()) else {
+                continue;
+            };
+            for addr in addrs {
+                let Some(ip) = addr.get("address").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                if out.iter().any(|c| c.value == ip) {
+                    continue;
+                }
+                let label = if name.is_empty() {
+                    ip.to_string()
+                } else {
+                    format!("{name} ({ip})")
+                };
+                out.push(candidate(ip.to_string(), label));
+            }
+        }
+        out
     }
 
     /// USB 打印机发现：file.exec /usr/bin/detectlp（复用 luci 同款脚本）。

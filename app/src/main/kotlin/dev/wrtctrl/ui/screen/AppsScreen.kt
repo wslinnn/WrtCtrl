@@ -1,6 +1,5 @@
 package dev.wrtctrl.ui.screen
 
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -54,7 +53,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -69,9 +67,9 @@ import dev.wrtctrl.viewmodel.AppsViewModel
 
 /**
  * 应用中心（底栏第 5 Tab；两组结构）：
- * 「插件」grid2（luci 插件，跳外部网页）+「维护工具」单卡行列表（原生工具页，降权收后）。
+ * 「插件」grid2（luci 插件，后续进入原生插件页）+「维护工具」单卡行列表（原生工具页）。
  * 插件按 uci get 探测显隐（firewall 恒显）；页面无轮询（进页/下拉刷新/切设备探测一次）。
- * 工具图标进入对应工具页（覆盖本 Tab 内容区）；插件点击 toast「即将推出」。
+ * 工具/插件页是组合级覆盖分支（appsHolder 按 key 保留），自带 BackHandler。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,14 +86,14 @@ fun AppsScreen(
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     LaunchedEffect(deviceId) { vm.ensureLoaded(deviceId) }
-    val context = LocalContext.current
-    val comingSoon = stringResource(R.string.apps_coming_soon)
     // 工具页覆盖：组合级分支，返回键由 ToolPage 自带 BackHandler 兜底，此处仅记 id
     var openToolId by rememberSaveable { mutableStateOf<String?>(null) }
     // 打开来源：首页直达 = true（返回撤销整个跳转，经 onToolExit 弹回来源 Tab）；列表点击 = false（停在本 Tab）
     var toolFromShortcut by rememberSaveable { mutableStateOf(false) }
-    // 状态保留规范：工具页 ↔ 列表互为覆盖分支，组合销毁会丢
-    // LazyVerticalGrid 滚动位置——两分支经 holder 按 key 保存恢复
+    // 插件页覆盖：组合级分支，返回键由 PluginPage 自带 BackHandler 兜底，返回停在本 Tab
+    var openPluginId by rememberSaveable { mutableStateOf<String?>(null) }
+    // 状态保留规范：工具/插件页 ↔ 列表互为覆盖分支，组合销毁会丢
+    // LazyVerticalGrid 滚动位置——各分支经 holder 按 key 保存恢复
     val appsHolder = rememberSaveableStateHolder()
     // 首页网络卡直达：消费外部带入的工具 id 后回调清空，避免再组合时重复打开
     LaunchedEffect(pendingToolId) {
@@ -106,24 +104,36 @@ fun AppsScreen(
         }
     }
     val toolId = openToolId
-    if (toolId != null) {
-        // 工具页与外层下拉刷新结构互斥：诊断/重启页无内层刷新，宿主 PTR 不得越权重探测插件
-        appsHolder.SaveableStateProvider("tool_$toolId") {
-            ToolRouter(
-                toolId = toolId,
-                deviceId = deviceId,
-                onBack = {
-                    openToolId = null
-                    if (toolFromShortcut) {
-                        toolFromShortcut = false
-                        onToolExit()
-                    }
-                },
-                onSessionLost = onSessionLost,
-            )
-        }
-    } else {
-        appsHolder.SaveableStateProvider("apps_list") {
+    val pluginId = openPluginId
+    when {
+        toolId != null ->
+            // 工具页与外层下拉刷新结构互斥：诊断/重启页无内层刷新，宿主 PTR 不得越权重探测插件
+            appsHolder.SaveableStateProvider("tool_$toolId") {
+                ToolRouter(
+                    toolId = toolId,
+                    deviceId = deviceId,
+                    onBack = {
+                        openToolId = null
+                        if (toolFromShortcut) {
+                            toolFromShortcut = false
+                            onToolExit()
+                        }
+                    },
+                    onSessionLost = onSessionLost,
+                )
+            }
+
+        pluginId != null && isPluginId(pluginId) ->
+            appsHolder.SaveableStateProvider("plugin_$pluginId") {
+                PluginRouter(
+                    pluginId = pluginId,
+                    deviceId = deviceId,
+                    onBack = { openPluginId = null },
+                )
+            }
+
+        else ->
+            appsHolder.SaveableStateProvider("apps_list") {
             PullToRefreshBox(
                 isRefreshing = state.refreshing,
                 onRefresh = vm::refresh,
@@ -152,9 +162,7 @@ fun AppsScreen(
                                 )
                             }
                             items(count = plugins.size, key = { i -> "plugin_${plugins[i].id}" }) { i ->
-                                PluginTile(app = plugins[i], onClick = {
-                                    Toast.makeText(context, comingSoon, Toast.LENGTH_SHORT).show()
-                                })
+                                PluginTile(app = plugins[i], onClick = { openPluginId = plugins[i].id })
                             }
                             item(key = "header_tools", span = { GridItemSpan(maxLineSpan) }) {
                                 GroupHeader(
