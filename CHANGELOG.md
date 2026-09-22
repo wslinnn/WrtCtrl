@@ -20,4 +20,4 @@
 - Rust workspace（core + jni）经 cargo-ndk 交叉编译，release profile 体积优化（opt-level=z + lto + strip）
 - debug 构建同开 R8（-dontobfuscate 保崩溃堆栈可读），APK ~17.5MB
 - locale JSON → strings.xml 生成管线（gen-strings）+ 四断言校验脚本（check-strings）
-- detekt 规则基线 + JVM 单测（115）+ Rust 单测（60+）+ CI 构建
+- detekt 规则基线 + JVM 单测（125）+ Rust 单测（60+）+ CI 构建

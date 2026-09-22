@@ -40,6 +40,22 @@ cargo test -p wrtctrl-core           # 改动 Rust core 后必跑
 - 列表 key 必须对「条目恒存在」全局唯一；图表配置 remember、数据走 modelProducer
 - 横向多元素布局按可用宽度比例分配（weight + fillMaxWidth/aspectRatio）
 
+## 签名与发布
+
+Release APK 的签名配置来自环境变量（CI 注入）或仓库根 `keystore.properties`（本地，已 gitignore）：
+
+```properties
+SIGNING_STORE_PASSWORD=...
+SIGNING_KEY_ALIAS=...
+SIGNING_KEY_PASSWORD=...
+```
+
+- keystore 文件默认取仓库根 `release.keystore`，可用环境变量 `SIGNING_KEYSTORE_FILE` 指向其他路径；环境变量优先于 keystore.properties
+- 两路都未配置时跳过签名配置，release 构建产出未签名包；debug 构建在签名可用时也使用 release 签名（保证 debug → release 可原地升级）
+- 本地出包：`./gradlew assembleRelease`（产物 `app/build/outputs/apk/release/`）
+- CI 发布：GitHub 仓库 secrets 配 `SIGNING_KEYSTORE_BASE64`（keystore 文件的 base64）与上述三个密码/别名变量；推送 `v*` tag 后 release workflow 自动跑测试、构建签名 APK 并创建 GitHub Release
+- 版本号在 `app/build.gradle.kts` 的 `versionName` / `versionCode`，发版前更新
+
 ## 图表（Vico）
 
 - 图表配置必须 `remember`，数据更新只走 `CartesianChartModelProducer.runTransaction`
