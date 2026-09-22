@@ -7,6 +7,8 @@
     <!-- Android 16 LNP：targetSdk≥36 访问局域网（192.168.x.x 等）必须持有「附近的设备」权限，
          过渡期挂靠 NEARBY_WIFI_DEVICES，未授权时 SYN 被静默黑洞（连接超时） -->
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
+    <!-- 应用内更新：下载 APK 后经系统安装器安装，「安装未知应用」授权由系统面板引导 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- 云备份只含设备地址/用户名/凭据密文与崩溃堆栈——数据最小化，整体禁用
          （Keystore 密钥本就不迁移，恢复后密文必然解密失败清空） -->
@@ -38,5 +40,16 @@
                 android:name="autoStoreLocales"
                 android:value="true" />
         </service>
+
+        <!-- 应用内更新：仅向系统安装器暴露 cache/updates 下的安装包 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

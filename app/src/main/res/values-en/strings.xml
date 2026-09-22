@@ -114,6 +114,25 @@
     <string name="desc_autoreboot">Scheduled reboots</string>
     <!-- Apps page group name (two sections: Plugins / Maintenance tools—latter via OVERRIDES on apps_group_tools) -->
     <string name="apps_group_plugins">Plugins</string>
+    <string name="apps_group_about">About</string>
+    <!-- In-app update (GitHub Releases check/download/system installer) -->
+    <string name="update_check_title">Check for updates</string>
+    <string name="update_current_version">Current version %1$s</string>
+    <string name="update_checking">Checking…</string>
+    <string name="update_latest">Up to date</string>
+    <string name="update_available_title">New version %1$s</string>
+    <string name="update_changelog">Changelog</string>
+    <string name="update_download">Download update</string>
+    <string name="update_downloading">Downloading…</string>
+    <string name="update_ready">Download complete</string>
+    <string name="update_install">Install</string>
+    <string name="update_later">Later</string>
+    <string name="update_view_page">Open releases page</string>
+    <string name="update_retry">Retry</string>
+    <string name="update_close">Close</string>
+    <string name="update_cancel_download">Cancel download</string>
+    <string name="update_check_failed">Update check failed. Check your network and retry.</string>
+    <string name="update_download_failed">Download failed. Please retry.</string>
     <!-- WiFi password reveal/copy + QR -->
     <string name="wifi_not_shareable">This network cannot be shared via QR code</string>
     <string name="wifi_open_network">No password</string>

@@ -1,5 +1,7 @@
 package dev.wrtctrl.ui.screen
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -9,13 +11,16 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Description
@@ -32,15 +37,19 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.SystemUpdateAlt
 import androidx.compose.material.icons.filled.WifiTethering
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -53,17 +62,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.wrtctrl.R
 import dev.wrtctrl.ui.component.GroupHeader
+import dev.wrtctrl.util.Format
 import dev.wrtctrl.viewmodel.AppItem
 import dev.wrtctrl.viewmodel.AppRegistry
 import dev.wrtctrl.viewmodel.AppsViewModel
+import dev.wrtctrl.viewmodel.UpdateViewModel
 
 /**
  * 应用中心（底栏第 5 Tab；两组结构）：
@@ -85,6 +98,9 @@ fun AppsScreen(
     onToolExit: () -> Unit = {},
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val updateVm: UpdateViewModel = viewModel()
+    // 更新弹窗为瞬态豁免（纯查看/确认型）；下载本体在 VM（Activity 作用域），切 Tab 不中断
+    var showUpdateDialog by remember { mutableStateOf(false) }
     LaunchedEffect(deviceId) { vm.ensureLoaded(deviceId) }
     // 工具页覆盖：组合级分支，返回键由 ToolPage 自带 BackHandler 兜底，此处仅记 id
     var openToolId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -176,12 +192,201 @@ fun AppsScreen(
                                     openToolId = it
                                 }
                             }
+                            item(key = "header_about", span = { GridItemSpan(maxLineSpan) }) {
+                                GroupHeader(
+                                    stringResource(R.string.apps_group_about),
+                                    Modifier.padding(top = 12.dp, bottom = 4.dp),
+                                )
+                            }
+                            item(key = "update_card", span = { GridItemSpan(maxLineSpan) }) {
+                                UpdateCard(
+                                    currentVersion = remember { updateVm.currentVersionName() },
+                                    onClick = {
+                                        updateVm.check()
+                                        showUpdateDialog = true
+                                    },
+                                )
+                            }
                         }
                     }
                 }
             }
         }
     }
+    if (showUpdateDialog) {
+        UpdateDialog(updateVm) { showUpdateDialog = false }
+    }
+}
+
+/** 检查更新行（关于分组）：图标 chip + 标题 + 当前版本右对齐 + ›；点击即检查并开弹窗 */
+@Composable
+private fun UpdateCard(currentVersion: String, onClick: () -> Unit) {
+    Card(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(32.dp)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(10.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.SystemUpdateAlt,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                stringResource(R.string.update_check_title),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                stringResource(R.string.update_current_version, currentVersion),
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.End,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Icon(
+                Icons.Filled.ChevronRight,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** 更新弹窗：按 VM 状态机渲染；下载中不允许误触关闭（取消走专用按钮），其余态可关闭归位 */
+@Composable
+private fun UpdateDialog(vm: UpdateViewModel, onDismiss: () -> Unit) {
+    val state by vm.state.collectAsStateWithLifecycle()
+    val close = {
+        onDismiss()
+        vm.dismiss()
+    }
+    when (val s = state) {
+        UpdateViewModel.UiState.Idle -> Unit
+
+        UpdateViewModel.UiState.Checking -> AlertDialog(
+            onDismissRequest = close,
+            title = { Text(stringResource(R.string.update_check_title)) },
+            text = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Text(stringResource(R.string.update_checking))
+                }
+            },
+            confirmButton = { TextButton(onClick = close) { Text(stringResource(R.string.update_close)) } },
+        )
+
+        UpdateViewModel.UiState.Latest -> AlertDialog(
+            onDismissRequest = close,
+            title = { Text(stringResource(R.string.update_check_title)) },
+            text = { Text(stringResource(R.string.update_latest)) },
+            confirmButton = { TextButton(onClick = close) { Text(stringResource(R.string.update_close)) } },
+        )
+
+        UpdateViewModel.UiState.CheckFailed -> AlertDialog(
+            onDismissRequest = close,
+            title = { Text(stringResource(R.string.update_check_title)) },
+            text = { Text(stringResource(R.string.update_check_failed)) },
+            confirmButton = { TextButton(onClick = vm::check) { Text(stringResource(R.string.update_retry)) } },
+            dismissButton = { TextButton(onClick = close) { Text(stringResource(R.string.update_close)) } },
+        )
+
+        UpdateViewModel.UiState.DownloadFailed -> AlertDialog(
+            onDismissRequest = close,
+            title = { Text(stringResource(R.string.update_download)) },
+            text = { Text(stringResource(R.string.update_download_failed)) },
+            confirmButton = { TextButton(onClick = vm::download) { Text(stringResource(R.string.update_retry)) } },
+            dismissButton = { TextButton(onClick = close) { Text(stringResource(R.string.update_close)) } },
+        )
+
+        is UpdateViewModel.UiState.Available -> AlertDialog(
+            onDismissRequest = close,
+            title = { Text(stringResource(R.string.update_available_title, s.info.tagName)) },
+            text = {
+                Column(
+                    Modifier
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (s.info.apkSize > 0) {
+                        Text(
+                            Format.bytes(s.info.apkSize),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (s.info.changelog.isNotBlank()) {
+                        Text(
+                            stringResource(R.string.update_changelog),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(s.info.changelog, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {
+                if (s.info.apkSize > 0) {
+                    TextButton(onClick = vm::download) { Text(stringResource(R.string.update_download)) }
+                } else {
+                    OpenReleasesButton(s.info.downloadUrl)
+                }
+            },
+            dismissButton = { TextButton(onClick = close) { Text(stringResource(R.string.update_later)) } },
+        )
+
+        is UpdateViewModel.UiState.Downloading -> AlertDialog(
+            // 下载中点外部/返回不关闭，避免误触中断下载；取消走「取消下载」按钮
+            onDismissRequest = {},
+            title = { Text(stringResource(R.string.update_available_title, s.info.tagName)) },
+            text = {
+                val progress = s.progress
+                if (progress == null) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        LinearProgressIndicator(progress = { progress }, Modifier.fillMaxWidth())
+                        Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = vm::cancelDownload) { Text(stringResource(R.string.update_cancel_download)) }
+            },
+        )
+
+        is UpdateViewModel.UiState.ReadyToInstall -> AlertDialog(
+            onDismissRequest = close,
+            title = { Text(stringResource(R.string.update_ready)) },
+            text = { Text(s.info.tagName) },
+            confirmButton = { TextButton(onClick = vm::install) { Text(stringResource(R.string.update_install)) } },
+            dismissButton = { TextButton(onClick = close) { Text(stringResource(R.string.update_close)) } },
+        )
+    }
+}
+
+/** 无 APK 资产的发布：改跳浏览器打开发布页 */
+@Composable
+private fun OpenReleasesButton(url: String) {
+    val context = LocalContext.current
+    TextButton(onClick = {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }) { Text(stringResource(R.string.update_view_page)) }
 }
 
 /** 插件瓦片：图标在上、名称/副标题单行居中，整卡可点无 chevron——
