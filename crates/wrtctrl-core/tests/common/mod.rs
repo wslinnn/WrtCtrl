@@ -34,6 +34,7 @@ pub async fn client_to(server: &MockServer, session: &str) -> RouterClient {
             session: Some(session.into()),
             username: "root".into(),
             password: "pw".into(),
+            expected_cert_sha256: None,
         }))
         .await;
     client

@@ -28,6 +28,9 @@ pub struct DeviceSession {
     pub session: Option<String>,
     pub username: String,
     pub password: String,
+    /// 期望的叶证书指纹：Some 时 https 登录前比对，不一致硬错误；
+    /// None = 首连（登录返回捕获值，由上层持久化）
+    pub expected_cert_sha256: Option<String>,
 }
 
 impl std::fmt::Debug for DeviceSession {
@@ -38,6 +41,7 @@ impl std::fmt::Debug for DeviceSession {
             .field("session", &self.session.as_ref().map(|_| "[redacted]"))
             .field("username", &self.username)
             .field("password", &"[redacted]")
+            .field("expected_cert_sha256", &self.expected_cert_sha256)
             .finish()
     }
 }

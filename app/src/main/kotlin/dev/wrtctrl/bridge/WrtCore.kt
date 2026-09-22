@@ -95,20 +95,37 @@ object WrtCore {
 
     // ── 会话与设备 ──
 
-    /** 设置/切换当前设备上下文（baseUrl 形如 http://192.168.1.1:80） */
-    suspend fun setDevice(baseUrl: String, username: String, password: String, session: String? = null) {
+    /** 设置/切换当前设备上下文（baseUrl 形如 http://192.168.1.1:80）；
+     *  expectedCertSha256 = TOFU 已记录指纹，非空时 https 登录前 core 会比对 */
+    suspend fun setDevice(
+        baseUrl: String,
+        username: String,
+        password: String,
+        session: String? = null,
+        expectedCertSha256: String? = null,
+    ) {
         val cfg = JSONObject().apply {
             put("baseUrl", baseUrl)
             put("username", username)
             put("password", password)
             if (session != null) put("session", session)
+            if (!expectedCertSha256.isNullOrBlank()) put("cert_sha256", expectedCertSha256)
         }
         call { setDeviceNative(cfg.toString()) }
     }
 
-    /** 登录成功返回 ubus_rpc_session（core 内部已就地切换会话） */
-    suspend fun login(): String =
-        call { loginNative() }.getJSONObject("data").getString("session")
+    /** 登录结果：会话 id + TOFU 叶证书指纹——https 且捕获成功时非空，
+     *  首连由调用方持久化到设备档案；重连路径不带指纹（校验在 core 内完成） */
+    data class LoginOutcome(val session: String, val certSha256: String?)
+
+    /** 登录成功返回会话与（可能的）证书指纹（core 内部已就地切换会话） */
+    suspend fun login(): LoginOutcome {
+        val data = call { loginNative() }.getJSONObject("data")
+        return LoginOutcome(
+            session = data.getString("session"),
+            certSha256 = data.optString("cert_sha256").takeIf { it.isNotBlank() },
+        )
+    }
 
     /** 重连：探活当前会话，失败自动用存储凭证重登 */
     suspend fun reconnect(): String =

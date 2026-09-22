@@ -15,6 +15,8 @@ data class Device(
     val useHttps: Boolean,
     val username: String,
     val password: String,
+    /** TOFU 叶证书指纹：首连捕获后持久化，后续登录 core 比对 */
+    val certSha256: String? = null,
 ) {
     /** 地址显示：默认端口省略（备注为空时用它做显示名） */
     val displayAddress: String
@@ -35,6 +37,7 @@ data class Device(
         put("useHttps", useHttps)
         put("username", username)
         put("password", SecureStore.encrypt(password))
+        if (!certSha256.isNullOrBlank()) put("certSha256", certSha256)
     }
 
     companion object {
@@ -51,6 +54,7 @@ data class Device(
                     Log.w("wrtctrl", "credential decrypt failed, password cleared: ${it.message}")
                     ""
                 },
+            certSha256 = obj.optString("certSha256").takeIf { it.isNotBlank() },
         )
     }
 }

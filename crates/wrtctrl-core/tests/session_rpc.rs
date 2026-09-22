@@ -39,6 +39,7 @@ async fn client_to(server: &MockServer, session: &str) -> RouterClient {
             session: Some(session.into()),
             username: "root".into(),
             password: "pw".into(),
+            expected_cert_sha256: None,
         }))
         .await;
     client
@@ -71,7 +72,8 @@ async fn login_swaps_session_in_place() {
     let client = client_to(&server, EMPTY_SESSION).await;
 
     let session = client.login().await.unwrap();
-    assert_eq!(session, "fresh-session");
+    assert_eq!(session.session, "fresh-session");
+    assert_eq!(session.cert_sha256, None); // http 目标不做 TOFU 捕获
     client.probe().await.unwrap();
 }
 
@@ -104,7 +106,7 @@ async fn login_always_uses_empty_session() {
     let client = client_to(&server, "stale-residue").await;
 
     let session = client.login().await.unwrap();
-    assert_eq!(session, "fresh");
+    assert_eq!(session.session, "fresh");
 }
 
 /// 契约：登录超时 → Timeout
@@ -126,6 +128,7 @@ async fn login_timeout_maps() {
             session: None,
             username: "root".into(),
             password: "pw".into(),
+            expected_cert_sha256: None,
         }))
         .await;
 
@@ -203,7 +206,7 @@ async fn reconnect_relogins_after_failure() {
     let client = client_to(&server, "stale").await;
 
     let session = client.reconnect().await.unwrap();
-    assert_eq!(session, "fresh");
+    assert_eq!(session.session, "fresh");
 }
 
 /// 契约：连接拒绝（端口不通）→ Network（区别于 Auth/Timeout）
@@ -221,6 +224,7 @@ async fn connect_refused_is_network_error() {
             session: Some("s".into()),
             username: "root".into(),
             password: "pw".into(),
+            expected_cert_sha256: None,
         }))
         .await;
 

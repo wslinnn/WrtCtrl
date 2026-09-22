@@ -3,6 +3,8 @@
     <!-- 手写资源（生成的 strings 在 strings_generated.xml，由 tools/gen-strings.mjs 产出） -->
     <string name="device_list_error_dns">DNS lookup failed: the hostname has no address on this network. If the domain is IPv6-only and your WiFi has no IPv6, use mobile data or connect via the LAN IP</string>
     <string name="device_list_error_refused">Connection refused: the device is unreachable or the port is closed. Check the device status and firewall rules</string>
+    <!-- TOFU certificate fingerprint mismatch -->
+    <string name="device_list_error_cert_mismatch">Device certificate differs from the one recorded on first connect — connection aborted (possible man-in-the-middle). If you did change the router certificate, delete and re-add the device to reset</string>
     <string name="debug_last_crash">Last crash</string>
     <string name="home_chart_collecting">Collecting data…</string>
     <!-- Dashboard card editing (card names reuse existing keys) -->

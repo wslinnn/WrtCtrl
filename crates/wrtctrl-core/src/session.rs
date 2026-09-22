@@ -30,6 +30,10 @@ pub enum LoginError {
     #[error("certificate: {0}")]
     Certificate(String),
 
+    /// TOFU 指纹不一致：当前证书与首连记录不符——MITM 或路由器证书已更换
+    #[error("certificate mismatch: expected {expected}, got {actual}")]
+    CertMismatch { expected: String, actual: String },
+
     #[error("network: {0}")]
     Network(String),
 
@@ -58,19 +62,58 @@ impl From<UbusError> for LoginError {
     }
 }
 
+impl std::fmt::Debug for LoginOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoginOutcome")
+            .field("session", &"[redacted]")
+            .field("cert_sha256", &self.cert_sha256)
+            .finish()
+    }
+}
+
+/// 登录结果：会话 id + TOFU 叶证书指纹（https 且捕获成功时非 None——
+/// 首连由上层持久化；重连路径不经此结构回传）
+#[derive(Clone)]
+pub struct LoginOutcome {
+    pub session: String,
+    pub cert_sha256: Option<String>,
+}
+
 impl RouterClient {
     /// 两段式登录：用当前上下文的凭证调 session.login，成功取 ubus_rpc_session
     /// 并就地更新会话。
     /// 登录强制以全 0 临时会话发起（旧 loginDevice 的 `sysauth: null`）——
     /// 带残留旧会话去登录是未定义行为。
-    pub async fn login(&self) -> Result<String, LoginError> {
-        let (url, base_url, credentials) = {
+    /// TOFU：https 目标登录前先做一次性握手比对叶证书指纹——
+    /// 有记录且不一致 = 硬错误（MITM 或证书已更换）；无记录 = 随登录结果
+    /// 带回捕获值由上层持久化；探针传输失败 fail-open（可达性由登录自身报错）。
+    pub async fn login(&self) -> Result<LoginOutcome, LoginError> {
+        let (url, base_url, credentials, expected_fp) = {
             let guard = self.session.read().await;
             let device = guard.as_ref().ok_or(LoginError::NoDevice)?;
             let url = format!("{}/ubus", device.base_url.trim_end_matches('/'));
             let credentials = (device.username.clone(), device.password.clone());
-            (url, device.base_url.clone(), credentials)
+            let expected = device.expected_cert_sha256.clone();
+            (url, device.base_url.clone(), credentials, expected)
         };
+        let mut observed_fp: Option<String> = None;
+        if base_url.starts_with("https://") {
+            match crate::tls_pin::leaf_fingerprint(&base_url).await {
+                Ok(fp) => {
+                    if let Some(expected) = &expected_fp {
+                        if expected != &fp {
+                            return Err(LoginError::CertMismatch {
+                                expected: expected.clone(),
+                                actual: fp,
+                            });
+                        }
+                    }
+                    observed_fp = Some(fp);
+                }
+                // 探针挂了不代表证书错：真实连接错误由 post_ubus 呈现
+                Err(_) => {}
+            }
+        }
         let (username, password) = credentials;
         let payload = self
             .post_ubus(
@@ -91,7 +134,7 @@ impl RouterClient {
             })?
             .to_string();
         self.update_session_id(&base_url, &session).await;
-        Ok(session)
+        Ok(LoginOutcome { session, cert_sha256: observed_fp })
     }
 
     /// 探针：system.board（3s）。仅判断会话/连通性，不关心载荷。
@@ -113,11 +156,11 @@ impl RouterClient {
         self.login().await.map(|_| ())
     }
 
-    /// 重连：探活当前会话，失败则静默重登。
-    /// 成功返回有效 session id；全部失败返回最后的登录错误。
+    /// 重连：探活当前会话，失败则静默重登（重登同样过 TOFU
+    /// 指纹校验）。成功返回有效 session；全部失败返回最后的登录错误。
     /// 未登录（session=None）直接走 login：probe 以 EMPTY_SESSION 发起，个别 ACL
     /// 配置会对未认证放行 system.board——那时全 0 临时会话会被误当有效会话返回
-    pub async fn reconnect(&self) -> Result<String, LoginError> {
+    pub async fn reconnect(&self) -> Result<LoginOutcome, LoginError> {
         let logged_in = self
             .session
             .read()
@@ -125,7 +168,10 @@ impl RouterClient {
             .as_ref()
             .is_some_and(|d| d.session.is_some());
         if logged_in && self.probe().await.is_ok() {
-            return Ok(self.current_session_id().await);
+            return Ok(LoginOutcome {
+                session: self.current_session_id().await,
+                cert_sha256: None,
+            });
         }
         self.login().await
     }

@@ -15,6 +15,7 @@ async fn client_with_session(server: &MockServer, session: Option<&str>) -> Rout
             session: session.map(str::to_string),
             username: "root".into(),
             password: "pw".into(),
+            expected_cert_sha256: None,
         }))
         .await;
     client

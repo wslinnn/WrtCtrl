@@ -8,9 +8,11 @@
          过渡期挂靠 NEARBY_WIFI_DEVICES，未授权时 SYN 被静默黑洞（连接超时） -->
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
 
+    <!-- 云备份只含设备地址/用户名/凭据密文与崩溃堆栈——数据最小化，整体禁用
+         （Keystore 密钥本就不迁移，恢复后密文必然解密失败清空） -->
     <application
         android:name=".WrtApp"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"

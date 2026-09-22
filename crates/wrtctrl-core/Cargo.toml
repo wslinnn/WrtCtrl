@@ -8,8 +8,12 @@ description = "WrtCtrl 核心：OpenWrt rpcd ubus 通信、会话与 UCI 写路�
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+# TLS 指纹探针：与 reqwest 的 rustls 0.23 同树，ring provider 统一
+tokio-rustls = "0.26"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+sha2 = "0.10"
 
 [dev-dependencies]
 wiremock = "0.6"

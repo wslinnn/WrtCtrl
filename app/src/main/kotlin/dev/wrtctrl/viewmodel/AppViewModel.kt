@@ -56,7 +56,11 @@ data class GateUiState(
 /**
  * 应用级门控状态机：Boot（探活上次设备）→ Gate（设备门控页）→ Main（五 Tab）。
  * 门控判定在此，门控页只消费状态。
+ *
+ * TooManyFunctions：函数数由功能面决定（状态机 + 门控页设备列表/表单/连接 + 探活 +
+ * TOFU 指纹持久化），拆 VM 只会把 Phase 语义打散（NetworkViewModel/ClientViewModel 同款豁免）。
  */
+@Suppress("TooManyFunctions")
 class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val repo = DeviceRepository(application)
 
@@ -112,7 +116,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             "binder error: ${e.message}"
         }
         android.util.Log.i("wrtctrl", "netbind: $netDesc")
-        WrtCore.setDevice(device.baseUrl, device.username, device.password, null)
+        WrtCore.setDevice(device.baseUrl, device.username, device.password, null, device.certSha256)
         WrtCore.reconnect()
         // 持久化「最近连接的设备」：此前只有表单提交路径写 setCurrent，列表直连不落盘——
         // 重启自动重连读到的永远是表单时代的旧设备，表现为每次冷启动都重连失败进列表
@@ -277,6 +281,30 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** TOFU 指纹合并：首连捕获的新指纹与已存不同则升级设备档案 */
+    private fun mergeTofuFingerprint(device: Device, captured: String?): Device = captured
+        ?.takeIf { it != device.certSha256 }
+        ?.let { device.copy(certSha256 = it) }
+        ?: device
+
+    /** 登录成功后的设备档案落库：编辑更新原条目，新建则追加（含 TOFU 指纹） */
+    private suspend fun persistConnectedDevice(editingId: String?, prior: Device?, device: Device) {
+        if (editingId != null && prior != null) {
+            repo.update(device)
+            repo.setCurrent(editingId)
+        } else {
+            repo.add(
+                host = device.host,
+                port = device.port,
+                useHttps = device.useHttps,
+                username = device.username,
+                password = device.password,
+                name = device.name,
+                certSha256 = device.certSha256,
+            ).let { repo.setCurrent(it.id) }
+        }
+    }
+
     /** 表单提交：字段校验 → 登录（密码仅限长度；备注可选）→ 落库进主界面 */
     fun submit() {
         val form = _gate.value.form
@@ -292,6 +320,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             val editingId = _gate.value.editingId
+            // 编辑保留原 TOFU 指纹：改备注/密码不应重置证书信任记录
+            val prior = editingId?.let { repo.get(it) }
             val device = Device(
                 id = editingId ?: UUID.randomUUID().toString(),
                 name = form.name,
@@ -300,6 +330,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 useHttps = form.useHttps,
                 username = form.username,
                 password = form.password,
+                certSha256 = prior?.certSha256,
             )
             // 绑定失败绝不阻断登录（返回描述串进错误卡诊断）；声明在 try 外供 catch 读取
             val netDesc = try {
@@ -308,18 +339,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 "binder error: ${e.message}"
             }
             try {
-                WrtCore.setDevice(device.baseUrl, device.username, device.password, null)
-                WrtCore.login()
-                if (editingId != null && repo.get(editingId) != null) {
-                    repo.update(device)
-                    repo.setCurrent(editingId)
-                } else {
-                    repo.add(
-                        host = device.host, port = device.port, useHttps = device.useHttps,
-                        username = device.username, password = device.password, name = device.name,
-                    ).let { repo.setCurrent(it.id) }
-                }
-                _current.value = device
+                WrtCore.setDevice(device.baseUrl, device.username, device.password, null, device.certSha256)
+                val outcome = WrtCore.login()
+                // 首连捕获 TOFU 指纹：随设备持久化；已记录时 core 校验一致才走到这
+                val finalDevice = mergeTofuFingerprint(device, outcome.certSha256)
+                persistConnectedDevice(editingId, prior, finalDevice)
+                _current.value = finalDevice
                 gateCameFromMain = false
                 _phase.value = Phase.Main
             } catch (e: CoreException) {
@@ -328,6 +353,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val textRes = when (e.code) {
                     "auth" -> R.string.device_list_error_auth
                     "certificate", "tls" -> R.string.device_list_error_certificate
+                    // TOFU 指纹不一致：专有引导（删除设备重加可重置记录）
+                    "cert_mismatch" -> R.string.device_list_error_cert_mismatch
                     "dns" -> R.string.device_list_error_dns
                     "refused" -> R.string.device_list_error_refused
                     "network", "timeout" -> R.string.device_list_error_network

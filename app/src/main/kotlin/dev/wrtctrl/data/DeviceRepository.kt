@@ -47,6 +47,7 @@ class DeviceRepository(private val context: Context) {
         username: String,
         password: String,
         name: String = "",
+        certSha256: String? = null,
     ): Device {
         val device = Device(
             id = UUID.randomUUID().toString(),
@@ -56,6 +57,7 @@ class DeviceRepository(private val context: Context) {
             useHttps = useHttps,
             username = username,
             password = password,
+            certSha256 = certSha256,
         )
         upsert { it + device }
         return device

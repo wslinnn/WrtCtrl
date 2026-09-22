@@ -12,11 +12,13 @@ pub mod ping;
 pub mod rpc;
 pub mod session;
 pub mod syslog;
+pub mod tls_pin;
 pub mod uci;
 pub mod wireless;
 
 pub use error::UbusError;
 pub use rpc::{DeviceSession, RouterClient, EMPTY_SESSION};
+pub use session::LoginOutcome;
 pub use syslog::LogLevel;
 
 /// crate 版本（JNI hello 冒烟会带回给 Kotlin 侧）

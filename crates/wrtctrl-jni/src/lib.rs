@@ -112,6 +112,8 @@ fn login_error_json(e: &LoginError) -> Value {
         LoginError::Auth(c) => ("auth", Some(*c)),
         LoginError::Timeout => ("timeout", None),
         LoginError::Certificate(_) => ("certificate", None),
+        // TOFU 指纹不一致：独立码供 UI 给「删除设备重加」引导
+        LoginError::CertMismatch { .. } => ("cert_mismatch", None),
         LoginError::Network(chain) => (network_code(chain), None),
         LoginError::InvalidResponse(_) => ("invalid_response", None),
         LoginError::NoDevice => ("no_device", None),
@@ -262,6 +264,11 @@ pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_setDeviceNative(
             session: obj.get("session").and_then(|v| v.as_str()).map(str::to_string),
             username: get_str("username"),
             password: get_str("password"),
+            // TOFU：已记录指纹透传给 core，登录前比对；首连为空
+            expected_cert_sha256: obj
+                .get("cert_sha256")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
         };
         client().set_session(Some(session)).await;
         // 信封统一为 data:null（此前 data={"ok":true} 与外层 ok 双层重复且无消费者）
@@ -275,14 +282,19 @@ pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_loginNative(
     _class: JClass,
 ) -> jstring {
     guarded_login!(env, async {
-        client()
-            .login()
-            .await
-            .map(|session| json!({"session": session}))
+        client().login().await.map(|outcome| {
+            // 首连带回 TOFU 指纹供上层持久化；有记录时 None（键省略）
+            let mut data = json!({"session": outcome.session});
+            if let Some(fp) = outcome.cert_sha256 {
+                data["cert_sha256"] = json!(fp);
+            }
+            data
+        })
     })
 }
 
-/// 重连：探活当前会话，失败自动用存储凭证重登
+/// 重连：探活当前会话，失败自动用存储凭证重登（
+/// 重登路径在 core 内过 TOFU 指纹校验，不一致直接失败）
 #[no_mangle]
 pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_reconnectNative(
     env: JNIEnv,
@@ -292,7 +304,7 @@ pub extern "system" fn Java_dev_wrtctrl_bridge_WrtCore_reconnectNative(
         client()
             .reconnect()
             .await
-            .map(|session| json!({"session": session}))
+            .map(|outcome| json!({"session": outcome.session}))
     })
 }
 

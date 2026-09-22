@@ -108,6 +108,8 @@ impl From<crate::session::LoginError> for UbusError {
             L::Timeout => UbusError::Timeout,
             L::NoDevice => UbusError::NoDevice,
             L::Certificate(m) | L::Network(m) => UbusError::Network(m),
+            // TOFU 指纹不一致：走 Network/Tls 分类通道，文案自带 expected/actual
+            L::CertMismatch { actual, .. } => UbusError::Network(actual),
             L::InvalidResponse(m) => UbusError::InvalidResponse(m),
         }
     }
