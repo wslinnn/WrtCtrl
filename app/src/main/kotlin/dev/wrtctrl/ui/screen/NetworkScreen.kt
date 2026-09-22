@@ -558,6 +558,7 @@ private fun SsidCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // 左侧内容 weight 填满贴右缘（不放占位 Spacer）
+                val channelLabel = stringResource(R.string.wifi_field_channel)
                 val meta = buildList {
                     add(
                         NetworkParsers.encryptionLabel(
@@ -566,7 +567,7 @@ private fun SsidCard(
                             stringResource(R.string.network_encrypted),
                         ),
                     )
-                    radio.channel?.let { add("Ch $it") }
+                    radio.channel?.let { add("$channelLabel $it") }
                 }.joinToString(" · ")
                 Text(
                     meta,

@@ -132,10 +132,11 @@ internal fun RadioBar(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                val channelLabel = stringResource(R.string.wifi_field_channel)
                 val meta = listOfNotNull(
                     radio.band,
                     radio.chip,
-                    radio.channel?.let { "Ch $it" },
+                    radio.channel?.let { "$channelLabel $it" },
                     radio.hwmodes?.let { "802.11$it" },
                 ).joinToString(" · ")
                 if (meta.isNotEmpty()) {

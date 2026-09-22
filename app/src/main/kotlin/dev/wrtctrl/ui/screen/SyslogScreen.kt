@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -147,6 +148,8 @@ private fun LogList(lines: List<LogLineUi>, modifier: Modifier = Modifier) {
     LaunchedEffect(lines.size) {
         if (lines.isNotEmpty()) listState.scrollToItem(lines.lastIndex)
     }
+    // warn 双模色——对齐 StatusBadge WARN 双模色
+    val warnColor = if (isSystemInDarkTheme()) LogWarnColorDark else LogWarnColorLight
     Card(modifier.fillMaxWidth()) {
         LazyColumn(
             Modifier.fillMaxSize().padding(8.dp),
@@ -159,7 +162,7 @@ private fun LogList(lines: List<LogLineUi>, modifier: Modifier = Modifier) {
                     Modifier.fillMaxWidth(),
                     color = when (line.level) {
                         "err" -> MaterialTheme.colorScheme.error
-                        "warn" -> LogWarnColor
+                        "warn" -> warnColor
                         else -> MaterialTheme.colorScheme.onSurface
                     },
                 )
@@ -168,5 +171,6 @@ private fun LogList(lines: List<LogLineUi>, modifier: Modifier = Modifier) {
     }
 }
 
-// 警示琥珀：与设备列表 ping 中档同色（浅深底均可读）
-private val LogWarnColor = androidx.compose.ui.graphics.Color(0xFFB26A00)
+// 警示琥珀双模（对齐 StatusBadge WARN 双模色；原单值深琥珀浅深底均 ~4.1:1 不足 AA）
+private val LogWarnColorLight = androidx.compose.ui.graphics.Color(0xFF8A6508)
+private val LogWarnColorDark = androidx.compose.ui.graphics.Color(0xFFFFB74D)
