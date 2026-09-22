@@ -17,6 +17,10 @@ release.keystore
 
 # 本地开发文档不入库
 /DEVPLAN.md
+/AGENTS.md
+/docs/research/
+/docs/review/
+/docs/specs/
 
 # Mimosa 安全扫描插件的工作区状态（hook 状态等本地产物，不入库）
 .mimosa/

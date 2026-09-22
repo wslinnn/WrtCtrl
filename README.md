@@ -26,7 +26,7 @@ app (Kotlin/Compose)  ←JNI→  wrtctrl-jni  →  wrtctrl-core (Rust)  →  rpc
 
 ## 构建
 
-环境要求：JDK 17、Android SDK（API 35）、NDK 27.2.12479018、Rust stable（含 `aarch64-linux-android` / `x86_64-linux-android` 目标）、cargo-ndk。
+环境要求：JDK 17、Android SDK（compileSdk 37，运行目标 targetSdk 35）、NDK 27.2.12479018、Rust stable（含 `aarch64-linux-android` / `x86_64-linux-android` 目标）、cargo-ndk。
 
 ```bash
 # Rust 单测（宿主机直跑）
