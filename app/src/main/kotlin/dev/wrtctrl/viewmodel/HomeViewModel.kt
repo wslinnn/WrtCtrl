@@ -89,11 +89,20 @@ data class HomeUiState(
  * 带宽目标 = wan 优先（l3_device），无 wan 回落 br-lan（旧 getQuickBandwidthTarget）。
  * 解析逻辑全部在 HomeParsers（纯函数，JVM 单测覆盖）。
  */
+// 仪表盘 VM 的职责面（轮询调度 + 恒定数据缓存 + 带宽锚定等）决定函数数贴近阈值上限
+@Suppress("TooManyFunctions")
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(HomeUiState())
     val state: StateFlow<HomeUiState> = _state
 
     private var bandwidthDevice: String? = null
+    /** 时间锚点（秒）：ts 列语义随固件而异（epoch/uptime），平移到手机墙钟；一次定格复用，目标变更失效 */
+    private var bandwidthAnchorSec: Long? = null
+
+    /** 取定格锚点；无则按「最后采样 ≈ 现在」现算并定格 */
+    private fun anchoredShift(lastSampleSec: Long): Long =
+        bandwidthAnchorSec
+            ?: (System.currentTimeMillis() / 1000 - lastSampleSec).also { bandwidthAnchorSec = it }
     private val dashboardPrefs = DashboardPrefs(application)
     private val deviceRepository = DeviceRepository(application)
     private var loadedDeviceId: String? = null
@@ -282,6 +291,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         if (target != bandwidthDevice) {
             // 目标切换（wan↔br-lan）时清空序列，避免混入旧设备的差分
             bandwidthDevice = target
+            bandwidthAnchorSec = null
             _state.update {
                 it.copy(
                     rxSeries = emptyList(),
@@ -321,10 +331,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             ts = ts.takeLast(60).toMutableList()
         }
         // 时间戳锚定到设备墙钟：luci 实时统计的 ts 语义随固件而异（epoch / 路由 uptime），
-        // 但都按真实秒推进——用「最后一次采样 ≈ 本次拉取时刻」线性平移，X 轴与查值标记
-        // 的时间对一切语义都正确（若本就是 epoch，偏移仅为网络延迟，无影响）
-        val wallNowSec = System.currentTimeMillis() / 1000
-        val shiftSec = wallNowSec - ts.last()
+        // 但都按真实秒推进——线性平移后 X 轴与查值标记的时间对一切语义都可读。
+        // 锚点一次定格（见 bandwidthAnchorSec）：此前逐刷重锚时，路由器缓冲的 1s 粒度 ts
+        // 与轮询节奏不锁相，shift 每刷抖 ±1s，整条序列时间戳（轴标签与查值浮层）跟着跳变
+        val shiftSec = anchoredShift(ts.last())
         // 断档截断（详见 contiguousBandwidthTail）：停轮询期间设备缓冲冻结，恢复后新旧样本假连续
         val (tailRx, tailTx, tailTs) =
             contiguousBandwidthTail(rx, tx, ts.map { it + shiftSec }, POLL_INTERVAL / 1000 * 3 + 2)

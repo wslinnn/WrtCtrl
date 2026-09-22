@@ -47,6 +47,10 @@ class StatisticsViewModel(application: Application) : AndroidViewModel(applicati
     private var loadedDeviceId: String? = null
     /** 设备/接口代次（reqSeq 守卫）：切设备或切接口 +1，在飞响应按代次丢弃 */
     private var generation = 0
+    /** 时间锚点（秒）：带宽/负载的 ts 列语义随固件而异（epoch/uptime），平移到手机墙钟；
+     *  一次定格复用——逐刷重锚会让整条序列时间戳随轮询漂移（轴标签/查值跳变）。切接口失效 */
+    private var bwAnchorSec: Long? = null
+    private var loadAnchorSec: Long? = null
     private val pollingActive = MutableStateFlow(false)
 
     fun setPollingActive(active: Boolean) {
@@ -97,6 +101,8 @@ class StatisticsViewModel(application: Application) : AndroidViewModel(applicati
         // 切接口不清曲线：旧接口曲线保留显示，新数据到达时单次原子替换。清空会让图表离开组合、modelProducer 销毁重建——切一次闪一次
         // 。代次失效防旧接口在飞响应回填新接口。
         generation++
+        bwAnchorSec = null
+        loadAnchorSec = null
         _state.update { it.copy(selectedDevice = name) }
         viewModelScope.launch { fetchBandwidth() }
     }
@@ -143,9 +149,11 @@ class StatisticsViewModel(application: Application) : AndroidViewModel(applicati
             val window = 60
             val rx = series.rx.takeLast(window)
             val tx = series.tx.takeLast(window)
-            // 墙钟锚定：最后采样 ≈ 本次拉取时刻（同 HomeViewModel.fetchBandwidth）
-            val shift = System.currentTimeMillis() / 1000 - series.timestamps.last()
-            val ts = series.timestamps.takeLast(window).map { it + shift }
+            // 墙钟锚定（锚点一次定格，同 HomeViewModel.fetchBandwidth）：首刷算一次 shift 后复用，
+            // 消除路由器缓冲 1s 粒度与轮询节奏不锁相导致的每刷 ±1s 时间漂移
+            val anchor = bwAnchorSec
+                ?: (System.currentTimeMillis() / 1000 - series.timestamps.last()).also { bwAnchorSec = it }
+            val ts = series.timestamps.takeLast(window).map { it + anchor }
             // 断档截断（同首页）：停轮询期间设备缓冲冻结，恢复后新旧样本假连续，
             // 截掉断档前样本——峰值/本窗口积分只算连续窗口
             val (tailRx, tailTx, tailTs) = contiguousBandwidthTail(rx, tx, ts, POLL_INTERVAL / 1000 * 3 + 2)
@@ -169,9 +177,11 @@ class StatisticsViewModel(application: Application) : AndroidViewModel(applicati
             val anchored = withContext(Dispatchers.IO) {
                 val rows = StatisticsParsers.loadRows(payload)
                 val window = rows.takeLast(LOAD_WINDOW)
-                // 墙钟锚定同带宽：最后采样 ≈ 本次拉取时刻（ts 语义随固件而异）
-                val shift = System.currentTimeMillis() / 1000 - (window.lastOrNull()?.ts ?: 0L)
-                val ts = window.map { it.ts + shift }
+                // 墙钟锚定（锚点一次定格）同带宽：首刷算一次 shift 后复用，消除每刷时间漂移
+                val anchor = loadAnchorSec ?: window.lastOrNull()?.let { last ->
+                    (System.currentTimeMillis() / 1000 - last.ts).also { loadAnchorSec = it }
+                } ?: 0L
+                val ts = window.map { it.ts + anchor }
                 val (series, tailTs) = contiguousLoadTail(
                     window.map { it.load1 },
                     window.map { it.load5 },
