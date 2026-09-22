@@ -12,8 +12,10 @@ build/
 app/src/main/jniLibs/
 /target/
 
-# 签名文件不入库（CI 由环境变量注入）
+# 签名文件不入库（本地：release.keystore + keystore.properties；CI 由 secrets 环境变量注入）
 release.keystore
+keystore.properties
+*.jks
 
 # 本地开发文档不入库
 /DEVPLAN.md

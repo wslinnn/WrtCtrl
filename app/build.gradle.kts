@@ -32,11 +32,17 @@ android {
     }
 
     signingConfigs {
-        // Release 签名来自环境变量（CI 注入），仓库内不存密码；缺省回退 debug 签名
-        val keystoreFile = file(System.getenv("SIGNING_KEYSTORE_FILE") ?: "${rootDir}/release.keystore")
-        val storePass = System.getenv("SIGNING_STORE_PASSWORD")
-        val keyAliasName = System.getenv("SIGNING_KEY_ALIAS")
-        val keyPass = System.getenv("SIGNING_KEY_PASSWORD")
+        // Release 签名：环境变量（CI 注入）优先，其次根目录 keystore.properties（本地，gitignored），
+        // keystore 文件缺省在仓库根 release.keystore；两者都缺时跳过配置（release 出未签名包）。
+        // 仓库内不存任何密码与密钥实体
+        val localSigning = file("${rootDir}/keystore.properties").takeIf { it.exists() }?.let {
+            Properties().apply { it.inputStream().use { stream -> load(stream) } }
+        }
+        fun signingProp(key: String): String? = System.getenv(key) ?: localSigning?.getProperty(key)
+        val keystoreFile = file(signingProp("SIGNING_KEYSTORE_FILE") ?: "${rootDir}/release.keystore")
+        val storePass = signingProp("SIGNING_STORE_PASSWORD")
+        val keyAliasName = signingProp("SIGNING_KEY_ALIAS")
+        val keyPass = signingProp("SIGNING_KEY_PASSWORD")
         if (keystoreFile.exists() && storePass != null && keyAliasName != null && keyPass != null) {
             create("release") {
                 storeFile = keystoreFile
