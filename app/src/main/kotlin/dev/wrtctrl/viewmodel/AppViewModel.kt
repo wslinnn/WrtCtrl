@@ -287,22 +287,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         ?.let { device.copy(certSha256 = it) }
         ?: device
 
-    /** 登录成功后的设备档案落库：编辑更新原条目，新建则追加（含 TOFU 指纹） */
-    private suspend fun persistConnectedDevice(editingId: String?, prior: Device?, device: Device) {
+    /** 登录成功后的设备档案落库：编辑更新原条目，新建则追加（含 TOFU 指纹）。
+     *  返回落库后的设备 id——repo.add 自造 id，与表单侧临时 id 不同，调用方必须以返回值
+     *  回填 _current，否则首页慢拍 resolveDevice 按幻影 id 查库落空（ping 徽章首会话不显示） */
+    private suspend fun persistConnectedDevice(editingId: String?, prior: Device?, device: Device): String {
         if (editingId != null && prior != null) {
             repo.update(device)
             repo.setCurrent(editingId)
-        } else {
-            repo.add(
-                host = device.host,
-                port = device.port,
-                useHttps = device.useHttps,
-                username = device.username,
-                password = device.password,
-                name = device.name,
-                certSha256 = device.certSha256,
-            ).let { repo.setCurrent(it.id) }
+            return editingId
         }
+        val added = repo.add(
+            host = device.host,
+            port = device.port,
+            useHttps = device.useHttps,
+            username = device.username,
+            password = device.password,
+            name = device.name,
+            certSha256 = device.certSha256,
+        )
+        repo.setCurrent(added.id)
+        return added.id
     }
 
     /** 表单提交：字段校验 → 登录（密码仅限长度；备注可选）→ 落库进主界面 */
@@ -343,8 +347,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val outcome = WrtCore.login()
                 // 首连捕获 TOFU 指纹：随设备持久化；已记录时 core 校验一致才走到这
                 val finalDevice = mergeTofuFingerprint(device, outcome.certSha256)
-                persistConnectedDevice(editingId, prior, finalDevice)
-                _current.value = finalDevice
+                // 回填落库 id：repo.add 自造 id 与表单侧临时 id 不同（见 persistConnectedDevice）
+                val persistedId = persistConnectedDevice(editingId, prior, finalDevice)
+                _current.value = finalDevice.copy(id = persistedId)
                 gateCameFromMain = false
                 _phase.value = Phase.Main
             } catch (e: CoreException) {
