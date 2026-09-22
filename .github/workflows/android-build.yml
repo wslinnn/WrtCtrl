@@ -8,8 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.2.12479018
     steps:
       - uses: actions/checkout@v4
 
@@ -18,10 +16,24 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - uses: android-actions/setup-android@v3
+      # ubuntu-latest 自带 Android SDK（含 cmdline-tools）：接入 PATH 并预接受 license；
+      # 平台与 build-tools 为小体积下载，走 sdkmanager 稳定
+      - name: Set up Android SDK
+        run: |
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
 
-      - name: Install NDK
-        run: sdkmanager --install "ndk;27.2.12479018" "platforms;android-37" "platforms;android-35" "build-tools;35.0.0"
+      # 平台包自 2026 起带次要版本号（37.0/37.1…），裸 android-37 在仓库中不存在；
+      # build-tools 不写死，AGP 按 (compileSdk, AGP 版本) 需要自动补装（license 已预接受）
+      - name: Install platform
+        run: sdkmanager --install "platforms;android-37.0"
+
+      # Rust 交叉编译的 NDK 固定版本（r27b = 27.2.12479018，与 app/build.gradle.kts
+      # 的 ndkVersion 一致）：专用 action 下载并缓存，规避 sdkmanager 大包安装的随机失败
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r27b
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -35,12 +47,15 @@ jobs:
       - name: Rust tests
         run: cargo test -p wrtctrl-core
 
-      # detekt + JVM 单测在 CI 拦截回归
       - name: Static analysis & unit tests
         run: ./gradlew --no-daemon detekt testDebugUnitTest
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
 
       - name: Build debug APK
         run: ./gradlew --no-daemon assembleDebug
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
 
       - uses: actions/upload-artifact@v4
         with:
