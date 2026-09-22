@@ -10,6 +10,9 @@ import dev.wrtctrl.bridge.WrtCore
 import dev.wrtctrl.util.Format
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -76,6 +79,11 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
     /** wan 接口的 l3_device（每次 dump 后更新；无 wan = null 不拉速率） */
     private var wanDevice: String? = null
 
+    /** radio disabled 表缓存（uci wireless 全量重拉只为此一个布尔）；
+     *  写路径/编辑器保存/切设备即失效，每 DISABLED_REVALIDATE_TICKS 拍静默对账兜外部改动 */
+    private var disabledCache: Map<String, Boolean>? = null
+    private var disabledSkipTicks = 0
+
     fun setPollingActive(active: Boolean) {
         pollingActive.value = active
     }
@@ -88,9 +96,13 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
                 pollingActive.first { it }
                 delay(POLL_INTERVAL)
                 if (pollingActive.value) {
-                    loadNow()
-                    loadWirelessNow()
-                    fetchWanRates()
+                    // 无线与接口两条链互不依赖：并行收敛 tick 活跃窗口；wan 速率依赖 loadNow 产出的 wanDevice
+                    coroutineScope {
+                        val wirelessJob = async { loadWirelessNow() }
+                        loadNow()
+                        fetchWanRates()
+                        wirelessJob.await()
+                    }
                 }
             }
         }
@@ -104,6 +116,8 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
             loadedDeviceId = deviceId
             generation++
             wanDevice = null
+            disabledCache = null
+            disabledSkipTicks = 0
             _state.update {
                 it.copy(
                     loading = true,
@@ -141,19 +155,26 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             _state.update { it.copy(refreshing = true, wirelessLoaded = false) }
             val startedAt = SystemClock.elapsedRealtime()
-            loadNow()
-            loadWirelessNow()
-            fetchWanRates()
+            coroutineScope {
+                val wirelessJob = async { loadWirelessNow() }
+                loadNow()
+                fetchWanRates()
+                wirelessJob.await()
+            }
             holdRefreshSpin(startedAt)
             _state.update { it.copy(refreshing = false) }
         }
     }
 
-    /** 接口 + 设备：双调用一成败败（部分失败按整轮失败保留旧值，不出现半新半旧） */
+    /** 接口 + 设备：双调用一成败败（部分失败按整轮失败保留旧值，不出现半新半旧）；
+     *  两调用互不依赖，并行发出 */
     private suspend fun loadNow() {
         val gen = generation
-        val dump = ubusSafe("network.interface", "dump")
-        val devices = ubusSafe("luci-rpc", "getNetworkDevices")
+        val (dump, devices) = coroutineScope {
+            val dumpJob = async { ubusSafe("network.interface", "dump") }
+            val devicesJob = async { ubusSafe("luci-rpc", "getNetworkDevices") }
+            dumpJob.await() to devicesJob.await()
+        }
         if (dump == null || devices == null) {
             if (gen == generation) _state.update { it.copy(loading = false, loadFailed = true) }
             return
@@ -178,12 +199,16 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /** 无线：失败保留旧列表，仅置 wirelessFailed 供空态分支；成功后逐 ifname 拉 assoc 计数。
-     *  并行补一次 uciGet("wireless") 取 radio 启停态（netifd status 不含 disabled option）；
-     *  uci 读取失败保留 disabled=false 缺省（启停写路径权威，开关仍可用） */
+     *  并行补一次 uciGet("wireless") 取 radio 启停态（netifd status 不含 disabled option，带缓存
+     *  对账）；uci 读取失败保留 disabled=false 缺省（启停写路径权威，开关仍可用）。
+     *  getWirelessDevices 与 disabled 对账互不依赖并行；assoc 计数逐 ifname 并行 */
     private suspend fun loadWirelessNow() {
         val gen = generation
-        val payload = ubusSafe("luci-rpc", "getWirelessDevices")
-        val uciWireless = uciWirelessSafe()
+        val (payload, disabledMap) = coroutineScope {
+            val radiosJob = async { ubusSafe("luci-rpc", "getWirelessDevices") }
+            val disabledJob = async { radioDisabledMap() }
+            radiosJob.await() to disabledJob.await()
+        }
         val radios = payload?.let {
             try {
                 NetworkParsers.radios(it)
@@ -198,7 +223,30 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
             if (gen == generation) _state.update { it.copy(wirelessFailed = true) }
             return
         }
-        val disabledMap = uciWireless?.let {
+        val merged = radios.map { radio -> radio.copy(disabled = disabledMap[radio.name] ?: false) }
+        val counts = coroutineScope {
+            merged.flatMap { it.ifaces }
+                .filter { it.ifname.isNotBlank() }
+                .map { iface -> async { iface.ifname to assocCount(iface.ifname) } }
+                .awaitAll()
+                .mapNotNull { (ifname, count) -> count?.let { ifname to it } }
+                .toMap()
+        }
+        if (gen != generation) return
+        _state.update {
+            it.copy(radios = merged, assocCounts = counts, wirelessLoaded = true, wirelessFailed = false)
+        }
+    }
+
+    /** radio disabled 表（带缓存对账）：命中且未到对账拍直接返回；uci 读失败不缓存
+     *  （下拍重试，缺省 disabled=false 语义不变） */
+    private suspend fun radioDisabledMap(): Map<String, Boolean> {
+        disabledCache?.takeIf { disabledSkipTicks < DISABLED_REVALIDATE_TICKS }?.let {
+            disabledSkipTicks++
+            return it
+        }
+        val uciWireless = uciWirelessSafe()
+        val parsed = uciWireless?.let {
             try {
                 NetworkParsers.radioDisabled(it)
             } catch (e: CancellationException) {
@@ -208,16 +256,17 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
                 emptyMap()
             }
         } ?: emptyMap()
-        val merged = radios.map { radio -> radio.copy(disabled = disabledMap[radio.name] ?: false) }
-        val counts = mutableMapOf<String, Int>()
-        merged.flatMap { it.ifaces }.forEach { iface ->
-            val ifname = iface.ifname
-            if (ifname.isNotBlank()) assocCount(ifname)?.let { counts[ifname] = it }
+        if (uciWireless != null) {
+            disabledCache = parsed
+            disabledSkipTicks = 0
         }
-        if (gen != generation) return
-        _state.update {
-            it.copy(radios = merged, assocCounts = counts, wirelessLoaded = true, wirelessFailed = false)
-        }
+        return parsed
+    }
+
+    /** disabled 缓存失效（写路径/编辑器保存后重拉走设备真相） */
+    private fun invalidateDisabledCache() {
+        disabledCache = null
+        disabledSkipTicks = 0
     }
 
     /**
@@ -239,6 +288,7 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
                 false
             }
             if (gen != generation) return@launch
+            invalidateDisabledCache()
             if (ok) {
                 _state.update { st ->
                     st.copy(
@@ -269,6 +319,7 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
                 false
             }
             if (gen != generation) return@launch
+            invalidateDisabledCache()
             _state.update {
                 it.copy(
                     busyRadio = null,
@@ -285,6 +336,7 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
 
     /** 无线编辑器保存后的强刷入口（无视 wirelessLoaded 直接静默重拉） */
     fun refreshWireless() {
+        invalidateDisabledCache()
         viewModelScope.launch { loadWirelessNow() }
     }
 
@@ -299,7 +351,7 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
         )
         val samples = payload?.optJSONArray("result") ?: JSONArray()
         val series = try {
-            Format.bandwidthRates(samples)
+            withContext(Dispatchers.IO) { Format.bandwidthRates(samples) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -410,5 +462,8 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
     private companion object {
         /** 轮询周期：与首页一致（可见时静默刷新） */
         const val POLL_INTERVAL = 3000L
+
+        /** disabled 缓存对账周期（拍数）：10 拍 ≈30s 兜外部（LuCI）改动 */
+        const val DISABLED_REVALIDATE_TICKS = 10
     }
 }

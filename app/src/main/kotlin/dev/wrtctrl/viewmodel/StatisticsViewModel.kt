@@ -8,6 +8,8 @@ import dev.wrtctrl.bridge.WrtCore
 import dev.wrtctrl.util.Format
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -58,8 +60,13 @@ class StatisticsViewModel(application: Application) : AndroidViewModel(applicati
                 pollingActive.first { it }
                 delay(POLL_INTERVAL)
                 if (!pollingActive.value) continue
-                fetchBandwidth()
-                fetchLoad()
+                // 吞吐与负载互不依赖：并行收敛 tick 活跃窗口
+                coroutineScope {
+                    val bwJob = async { fetchBandwidth() }
+                    val loadJob = async { fetchLoad() }
+                    bwJob.await()
+                    loadJob.await()
+                }
             }
         }
     }
@@ -76,8 +83,12 @@ class StatisticsViewModel(application: Application) : AndroidViewModel(applicati
             val initial = options.firstOrNull { it == "br-lan" } ?: options.firstOrNull()
             if (gen != generation) return@launch
             _state.update { it.copy(interfaces = options, selectedDevice = initial) }
-            initial?.let { fetchBandwidth(gen) }
-            fetchLoad(gen)
+            coroutineScope {
+                val bwJob = async { fetchBandwidth(gen) }
+                val loadJob = async { fetchLoad(gen) }
+                bwJob.await()
+                loadJob.await()
+            }
         }
     }
 
@@ -95,8 +106,12 @@ class StatisticsViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             _state.update { it.copy(refreshing = true) }
             val startedAt = SystemClock.elapsedRealtime()
-            fetchBandwidth()
-            fetchLoad()
+            coroutineScope {
+                val bwJob = async { fetchBandwidth() }
+                val loadJob = async { fetchLoad() }
+                bwJob.await()
+                loadJob.await()
+            }
             holdRefreshSpin(startedAt)
             _state.update { it.copy(refreshing = false) }
         }
@@ -111,7 +126,7 @@ class StatisticsViewModel(application: Application) : AndroidViewModel(applicati
                 // 调用失败：静默保留现有曲线（静默保留），不清不闪
                 return
             }
-            val series = Format.bandwidthRates(payload)
+            val series = withContext(Dispatchers.IO) { Format.bandwidthRates(payload) }
             if (gen != generation) return
             if (series.rx.isEmpty()) {
                 // 成功返回但无样本 = 新选接口确无数据：清空进等高占位（曲线归属必须正确）
@@ -149,11 +164,24 @@ class StatisticsViewModel(application: Application) : AndroidViewModel(applicati
             // 此前 `?: emptyList()` 会把瞬时失败当「成功但无样本」清空负载图）
             val payload = ubusSafe("luci", "getRealtimeStats", JSONObject().put("mode", "load"))
                 ?.optJSONArray("result") ?: return
-            val rows = StatisticsParsers.loadRows(payload)
+            // 解析+窗口收口整体放 IO；60 点窗口与断档截断对齐带宽口径——
+            // 设备缓冲全量进来会让三线图画远多于带宽图的点，且停轮询期新旧样本假连续
+            val anchored = withContext(Dispatchers.IO) {
+                val rows = StatisticsParsers.loadRows(payload)
+                val window = rows.takeLast(LOAD_WINDOW)
+                // 墙钟锚定同带宽：最后采样 ≈ 本次拉取时刻（ts 语义随固件而异）
+                val shift = System.currentTimeMillis() / 1000 - (window.lastOrNull()?.ts ?: 0L)
+                val ts = window.map { it.ts + shift }
+                val (series, tailTs) = contiguousLoadTail(
+                    window.map { it.load1 },
+                    window.map { it.load5 },
+                    window.map { it.load15 },
+                    ts,
+                    POLL_INTERVAL / 1000 * 3 + 2,
+                )
+                tailTs.mapIndexed { i, t -> LoadRow(t, series[0][i], series[1][i], series[2][i]) }
+            }
             if (gen != generation) return
-            // 墙钟锚定同带宽：最后采样 ≈ 本次拉取时刻（ts 语义随固件而异）
-            val shift = System.currentTimeMillis() / 1000 - (rows.lastOrNull()?.ts ?: 0L)
-            val anchored = rows.map { it.copy(ts = it.ts + shift) }
             _state.update { it.copy(loadLoading = false, loadRows = anchored) }
         } catch (e: CancellationException) {
             throw e
@@ -175,5 +203,27 @@ class StatisticsViewModel(application: Application) : AndroidViewModel(applicati
 
     private companion object {
         const val POLL_INTERVAL = 3000L
+
+        /** 负载曲线窗口：对齐带宽 60 点口径 */
+        const val LOAD_WINDOW = 60
     }
+}
+
+/** 负载三线断档截断（与 HomeParsers.contiguousBandwidthTail 同算法——负载是三线，签名多一线） */
+private fun contiguousLoadTail(
+    load1: List<Double>,
+    load5: List<Double>,
+    load15: List<Double>,
+    ts: List<Long>,
+    gapLimitSec: Long,
+): kotlin.Pair<List<List<Double>>, List<Long>> {
+    var cut = 0
+    for (i in 1 until ts.size) {
+        if (ts[i] - ts[i - 1] > gapLimitSec) cut = i
+    }
+    if (cut == 0) return Pair(listOf(load1, load5, load15), ts)
+    return Pair(
+        listOf(load1.drop(cut), load5.drop(cut), load15.drop(cut)),
+        ts.drop(cut),
+    )
 }

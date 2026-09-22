@@ -138,6 +138,22 @@ class ToolParsersTest {
         assertNull(ToolParsers.parseConntrackStats(JSONArray("[]")))
     }
 
+    /** 行数上限 1000，字节降序取头部（top talkers），total 为截断前全量 */
+    @Test
+    fun conntrack_caps_rows_keeps_top_bytes_and_total() {
+        val sb = StringBuilder("[")
+        for (i in 0 until 1200) {
+            if (i > 0) sb.append(",")
+            sb.append("""{"layer3":"ipv4","layer4":"tcp","src":"10.0.0.$i","dst":"1.1.1.1","bytes":$i,"packets":1}""")
+        }
+        sb.append("]")
+        val (total, rows) = ToolParsers.parseConntrack(JSONArray(sb.toString()))
+        assertEquals(1200, total)
+        assertEquals(1000, rows.size)
+        assertEquals(1199, rows[0].bytes) // 头部 = 最大字节
+        assertEquals(200, rows[rows.size - 1].bytes) // 第 1000 名
+    }
+
     @Test
     fun rrdns_and_log_lines() {
         val map = ToolParsers.parseRrdns(JSONObject("""{"1.1.1.1":"one.one.one.one","8.8.8.8":""}"""))
@@ -148,6 +164,21 @@ class ToolParsersTest {
         )
         assertEquals("err", lines[0].level)
         assertEquals("warn", lines[1].level)
+    }
+
+    /** 日志行数上限 2000 取尾（「滚底看最新」语义） */
+    @Test
+    fun log_lines_cap_keeps_tail() {
+        val sb = StringBuilder("[")
+        for (i in 0 until 2200) {
+            if (i > 0) sb.append(",")
+            sb.append("""{"text":"line$i","level":"info"}""")
+        }
+        sb.append("]")
+        val lines = ToolParsers.parseLogLines(JSONArray(sb.toString()))
+        assertEquals(2000, lines.size)
+        assertEquals("line200", lines[0].text) // 最早 200 行（line0..line199）被裁
+        assertEquals("line2199", lines[lines.size - 1].text)
     }
 
     /** R.string 字段 id → 资源名（断言用；R.string 常量在 JVM 单测 classpath 可用） */

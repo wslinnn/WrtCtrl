@@ -127,9 +127,17 @@ fun ClientScreen(vm: ClientViewModel, deviceId: String?, modifier: Modifier = Mo
             onRefresh = vm::refresh,
             modifier = Modifier.fillMaxSize(),
         ) {
-            val wireless = state.wirelessClients.matching(search) { listOf(it.mac, it.hostname, it.ip) }
-            val leases4 = state.dhcpv4.matching(search) { listOf(it.macaddr, it.hostname, it.ip) }
-            val leases6 = state.dhcpv6.matching(search) { listOf(it.macaddr, it.hostname, it.ip) }
+            // 搜索过滤 remember：每 tick 重组 + 每击键都不重算；key 含内容引用，
+            // VM 短路保持实例稳定时彻底跳过
+            val wireless = remember(state.wirelessClients, search) {
+                state.wirelessClients.matching(search) { listOf(it.mac, it.hostname, it.ip) }
+            }
+            val leases4 = remember(state.dhcpv4, search) {
+                state.dhcpv4.matching(search) { listOf(it.macaddr, it.hostname, it.ip) }
+            }
+            val leases6 = remember(state.dhcpv6, search) {
+                state.dhcpv6.matching(search) { listOf(it.macaddr, it.hostname, it.ip) }
+            }
             val staticMacSet = remember(state.staticHosts) { state.staticHosts.map { it.mac }.toSet() }
             // 已封禁区块：firewall block_ 规则全量，与客户端列表解耦——
             // 租约过期/断联的设备仍可解除；名称 = 动态租约名 → 静态租约名，查不到只显 MAC（数据有源）
@@ -147,10 +155,14 @@ fun ClientScreen(vm: ClientViewModel, deviceId: String?, modifier: Modifier = Mo
                     }
                     .sortedBy { it.mac }
             }
-            val blockedFiltered = blockedEntries.matching(search) { listOf(it.name, it.ip, it.mac) }
+            val blockedFiltered = remember(blockedEntries, search) {
+                blockedEntries.matching(search) { listOf(it.name, it.ip, it.mac) }
+            }
             // 静态租约区块：uci dhcp @host 全量（含绑定 IP），离线绑定同样可查看/取消
             val staticEntries = remember(state.staticHosts) { state.staticHosts }
-            val staticFiltered = staticEntries.matching(search) { listOf(it.name, it.ip, it.mac) }
+            val staticFiltered = remember(staticEntries, search) {
+                staticEntries.matching(search) { listOf(it.name, it.ip, it.mac) }
+            }
             LazyColumn(
                 Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(16.dp),

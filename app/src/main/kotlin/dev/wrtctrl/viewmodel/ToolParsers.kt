@@ -94,7 +94,7 @@ internal object ToolParsers {
     /** token 行走解析：default/via/dev/src/scope/table + 目的地探测 */
     internal fun parseRouteLine(line: String, family: String): RouteRow? {
         if (line.isEmpty()) return null
-        val parts = line.split(Regex("\\s+"))
+        val parts = line.split(WHITESPACE_SPLIT)
         var destination: String? = null
         var gateway: String? = null
         var device: String? = null
@@ -200,7 +200,9 @@ internal object ToolParsers {
             )
         }.filterNot { (it.src == "127.0.0.1" && it.dst == "127.0.0.1") || (it.src == "::1" && it.dst == "::1") }
             .sortedByDescending { it.bytes }
-        return rows.size to rows
+        // 行数上限：字节降序取头部 = 保留 top talkers；total 为截断前全量，
+        // 单列显示不受影响。2000+ 行的 BT/PT 场景每 5s 全量重建 + 无界常驻是最大分配源
+        return rows.size to rows.take(CONNTRACK_MAX_ROWS)
     }
 
     /** getRealtimeStats{mode:conntrack} 列 → 窗口统计（复用 StatisticsParsers，列 1=UDP 2=TCP 3=其它） */
@@ -227,15 +229,27 @@ internal object ToolParsers {
 
     // ── syslog ──
 
-    /** core readSyslog/readDmesg → 行模型（级别串原样：err/warn/info） */
-    fun parseLogLines(arr: JSONArray): List<LogLineUi> =
-        (0 until arr.length()).mapNotNull { i ->
+    /** core readSyslog/readDmesg → 行模型（级别串原样：err/warn/info）；超上限取尾
+     *   */
+    fun parseLogLines(arr: JSONArray): List<LogLineUi> {
+        val lines = (0 until arr.length()).mapNotNull { i ->
             val o = arr.optJSONObject(i) ?: return@mapNotNull null
             LogLineUi(text = o.optString("text"), level = o.optString("level", "info"))
         }
+        return lines.takeLast(SYSLOG_MAX_LINES)
+    }
 
     private fun JSONObject.optIntOrNull(key: String): Int? =
         if (has(key) && !isNull(key)) optInt(key) else null
 
     private val IPV4_LITERAL = Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+$")
+
+    /** 路由行分词（parseRouteLine 每行调用，提为常量免重复编译——P2-2） */
+    private val WHITESPACE_SPLIT = Regex("\\s+")
+
+    /** conntrack 行数上限 */
+    private const val CONNTRACK_MAX_ROWS = 1000
+
+    /** syslog/dmesg 行数上限 */
+    private const val SYSLOG_MAX_LINES = 2000
 }

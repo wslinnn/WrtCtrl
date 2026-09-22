@@ -64,6 +64,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.appcompat.app.AppCompatDelegate
@@ -125,8 +127,11 @@ fun AppRoot() {
         )
     }
     LaunchedEffect(Unit) {
-        val file = File(context.filesDir, "last_crash.txt")
-        if (file.exists()) crashText = runCatching { file.readText() }.getOrNull()
+        // 崩溃堆栈读盘下沉 IO：冷启动首帧最敏感窗口不做主线程文件 IO
+        crashText = withContext(Dispatchers.IO) {
+            val file = File(context.filesDir, "last_crash.txt")
+            if (file.exists()) runCatching { file.readText() }.getOrNull() else null
+        }
     }
 
     // 崩溃卡用浮层呈现：状态栏避让 + 悬浮于内容上方（不挤压布局、不产生空隙）

@@ -169,6 +169,20 @@ fun NetworkScreen(vm: NetworkViewModel, deviceId: String?, modifier: Modifier = 
                         }
                         map
                     }
+                    // 设备承载关系预建 Map：iface l3_device 优先，其次无线 ifname→SSID
+                    // （原 carryingLabel 每设备行双重线性扫描）
+                    val carryingByDevice = remember(state.ifaces, state.radios) {
+                        val map = mutableMapOf<String?, String?>()
+                        state.radios.forEach { radio ->
+                            radio.ifaces.forEach { iface -> map[iface.ifname] = iface.ssid }
+                        }
+                        state.ifaces.forEach { iface -> map[iface.l3Device] = iface.name }
+                        map
+                    }
+                    // 系统设备清单预建：原在 LazyColumn 内容 lambda 内每 tick 重组重算
+                    val sysDevices = remember(state.deviceGroups) {
+                        state.deviceGroups.filter { it.type != "bridge" }.flatMap { it.devices }
+                    }
                     // 未拉取凭据则先拉一次（uci wireless），随即开二维码弹窗
                     fun requestWifi(ifname: String) {
                         if (!state.wifiSecrets.containsKey(ifname)) vm.fetchWifiSecret(ifname)
@@ -204,21 +218,29 @@ fun NetworkScreen(vm: NetworkViewModel, deviceId: String?, modifier: Modifier = 
                     )
                 }
                 item { GroupHeader(stringResource(R.string.network_sys_devices), Modifier.padding(top = 8.dp)) }
-                val sysDevices = state.deviceGroups.filter { it.type != "bridge" }.flatMap { it.devices }
-                if (sysDevices.isEmpty()) {
-                    item { SectionText(stringResource(R.string.network_empty)) }
-                } else {
-                    items(sysDevices, key = { "dev_${it.name}" }) { device ->
-                        DeviceRow(
-                            device,
-                            carrying = carryingLabel(device, state),
-                            chip = chipByIfname[device.name],
-                        )
-                    }
-                }
+                sysDevicesItems(sysDevices, carryingByDevice, chipByIfname)
             }
         }
     }
+    }
+}
+
+/** 系统设备清单条目：空态文案或设备行（承载关系/芯片预建 Map 查表；键含 null=承载未知） */
+private fun androidx.compose.foundation.lazy.LazyListScope.sysDevicesItems(
+    sysDevices: List<NetDeviceInfo>,
+    carryingByDevice: Map<String?, String?>,
+    chipByIfname: Map<String, String?>,
+) {
+    if (sysDevices.isEmpty()) {
+        item { SectionText(stringResource(R.string.network_empty)) }
+    } else {
+        items(sysDevices, key = { "dev_${it.name}" }) { device ->
+            DeviceRow(
+                device,
+                carrying = carryingByDevice[device.name],
+                chip = chipByIfname[device.name],
+            )
+        }
     }
 }
 
@@ -310,13 +332,6 @@ private fun RadioActionDialogs(
             onDismiss = onDismiss,
         )
     }
-}
-
-/** 设备的承载关系：l3_device 命中 → 承载接口名；无线 ifname 命中 → 承载 SSID */
-private fun carryingLabel(device: NetDeviceInfo, state: NetworkUiState): String? {
-    state.ifaces.firstOrNull { it.l3Device == device.name }?.let { return it.name }
-    state.radios.flatMap { it.ifaces }.firstOrNull { it.ifname == device.name }?.let { return it.ssid }
-    return null
 }
 
 /** 接口卡：卡头（名称·协议 / 主值 / 状态徽章 / chevron，整行点击展开）

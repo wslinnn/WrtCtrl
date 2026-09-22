@@ -47,6 +47,22 @@ android {
         }
     }
 
+    // 只保留中英：AndroidX 的 85 语翻译（126 键）全量打进 resources.arsc 是 ~0.5MB 死重
+    // （实测 arsc 12,638 条 string 配置行里 app 自有仅 ~1,900 行）。AGP 9 已移除
+    // defaultConfig.resourceConfigurations，localeFilters 是唯一 DSL。
+    androidResources {
+        localeFilters += listOf("zh", "en")
+    }
+
+    packaging {
+        resources {
+            // 8 份相同的 10KB Apache LICENSE（annotation/collection/datastore/lifecycle 各带一份）；
+            // 两种模式都写：AGP 打包排除对 */ 与 **/ 的匹配深度不同，双保险
+            excludes += "META-INF/*/LICENSE.txt"
+            excludes += "META-INF/**/LICENSE.txt"
+        }
+    }
+
     buildTypes {
         debug {
             if (signingConfigs.names.contains("release")) {
@@ -56,11 +72,17 @@ android {
             // 40MB+ dex（APK 74MB→~25MB），高频装包体积优先于构建速度（+约1min）。
             // dontobfuscate 保留类名/行号——last_crash.txt 崩溃堆栈必须可读（排障依赖）。
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
                 "proguard-rules-debug.pro"
             )
+            // 与 cargo-ndk 产物对齐（arm64+x86_64）：去掉仅含 androidx 残件的
+            // armeabi-v7a/x86 目录（实体机与模拟器各一个 ABI 足够）
+            ndk {
+                abiFilters += listOf("arm64-v8a", "x86_64")
+            }
         }
         release {
             isMinifyEnabled = true

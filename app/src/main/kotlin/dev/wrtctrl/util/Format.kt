@@ -113,31 +113,45 @@ object Format {
 
     /**
      * 带宽采样差分（clamp=true）：
-     * samples: [[ts, rx, ?, tx],...]；dt<=0 跳过；负值（计数器回绕）置 0
+     * samples: [[ts, rx, ?, tx],...]；dt<=0 跳过；负值（计数器回绕）置 0。
+     * 逐行解析一次并滚动保留前一行四元组：免相邻迭代重复解析 + 每样本装箱 List
+     * 
      */
     fun bandwidthRates(samples: JSONArray, clamp: Boolean = true): BandwidthSeries {
         val series = BandwidthSeries()
-        if (samples.length() < 2) return series
-        fun row(i: Int): List<Double> {
-            val item = samples.getJSONArray(i)
-            return (0 until item.length()).map { item.optDouble(it, 0.0) }
-        }
-        for (i in 1 until samples.length()) {
-            val cur = row(i)
-            val prev = row(i - 1)
-            if (cur.size < 4 || prev.size < 4) continue
-            val dt = cur[0] - prev[0]
-            if (dt <= 0) continue
-            var rx = (cur[1] - prev[1]) / dt
-            var tx = (cur[3] - prev[3]) / dt
-            if (clamp) {
-                rx = rx.coerceAtLeast(0.0)
-                tx = tx.coerceAtLeast(0.0)
+        var prev: BandwidthSample? = null
+        for (i in 0 until samples.length()) {
+            val cur = sampleAt(samples, i)
+            if (cur == null) {
+                prev = null // 畸形/短样本不可作差分基线
+                continue
             }
-            series.timestamps += cur[0].roundToLong()
-            series.rx += rx
-            series.tx += tx
+            prev?.let { appendDiff(series, it, cur, clamp) }
+            prev = cur
         }
         return series
+    }
+
+    /** 单个带宽采样：[ts, rx, ?, tx]（index 2 为设备侧保留列，差分不用） */
+    private data class BandwidthSample(val ts: Double, val rxTotal: Double, val txTotal: Double)
+
+    private fun sampleAt(samples: JSONArray, i: Int): BandwidthSample? {
+        val item = samples.optJSONArray(i) ?: return null
+        if (item.length() < 4) return null
+        return BandwidthSample(item.optDouble(0, 0.0), item.optDouble(1, 0.0), item.optDouble(3, 0.0))
+    }
+
+    private fun appendDiff(series: BandwidthSeries, prev: BandwidthSample, cur: BandwidthSample, clamp: Boolean) {
+        val dt = cur.ts - prev.ts
+        if (dt <= 0) return
+        var rx = (cur.rxTotal - prev.rxTotal) / dt
+        var tx = (cur.txTotal - prev.txTotal) / dt
+        if (clamp) {
+            rx = rx.coerceAtLeast(0.0)
+            tx = tx.coerceAtLeast(0.0)
+        }
+        series.timestamps += cur.ts.roundToLong()
+        series.rx += rx
+        series.tx += tx
     }
 }

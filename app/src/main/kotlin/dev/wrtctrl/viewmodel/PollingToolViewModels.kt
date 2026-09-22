@@ -6,8 +6,6 @@ import androidx.lifecycle.viewModelScope
 import dev.wrtctrl.bridge.WrtCore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -204,13 +202,20 @@ class SyslogViewModel(application: Application) : AndroidViewModel(application) 
         val sgen = sourceGen
         val source = _state.value.source
         try {
-            val arr = withContext(Dispatchers.IO) {
-                if (source == "syslog") WrtCore.readSyslog() else WrtCore.readDmesg()
+            // 拉取+解析都在 IO；行数上限 2000 取尾
+            val lines = withContext(Dispatchers.IO) {
+                val arr = if (source == "syslog") WrtCore.readSyslog() else WrtCore.readDmesg()
+                ToolParsers.parseLogLines(arr)
             }
             // 双代次校验：切设备（generation）或切源（sourceGen）后的旧响应一律丢弃
             if (gen != generation || sgen != sourceGen) return
-            _state.update {
-                it.copy(loading = false, loadFailed = false, lines = ToolParsers.parseLogLines(arr))
+            _state.update { current ->
+                // 内容未变跳过实例替换：5s 全量重拉 99% 相同，省 LazyColumn 全量 diff
+                if (current.lines == lines && !current.loading && !current.loadFailed) {
+                    current
+                } else {
+                    current.copy(loading = false, loadFailed = false, lines = lines)
+                }
             }
         } catch (e: CancellationException) {
             throw e
@@ -313,27 +318,30 @@ class ConntrackViewModel(application: Application) : AndroidViewModel(applicatio
         busy = true
         val gen = generation
         try {
-            coroutineScope {
-                val list = async(Dispatchers.IO) { WrtCore.callUbus("luci", "getConntrackList") }
-                val stats = async(Dispatchers.IO) {
-                    WrtCore.callUbus("luci", "getRealtimeStats", JSONObject().put("mode", "conntrack"))
-                }
-                val rowsResult = list.await().optJSONArray("result")?.let(ToolParsers::parseConntrack)
-                val statsResult = stats.await().optJSONArray("result")?.let(ToolParsers::parseConntrackStats)
-                if (gen != generation) return@coroutineScope
-                _state.update {
-                    it.copy(
-                        loading = false,
-                        loadFailed = false,
-                        rows = rowsResult?.second ?: it.rows,
-                        total = rowsResult?.first ?: it.total,
-                        udp = statsResult?.first,
-                        tcp = statsResult?.second,
-                        other = statsResult?.third,
-                    )
-                }
-                refreshDns()
+            // 拉取与解析都在 IO：await 后的解析不再落回主线程
+            val rowsResult = withContext(Dispatchers.IO) {
+                WrtCore.callUbus("luci", "getConntrackList")
+                    .optJSONArray("result")
+                    ?.let(ToolParsers::parseConntrack)
             }
+            val statsResult = withContext(Dispatchers.IO) {
+                WrtCore.callUbus("luci", "getRealtimeStats", JSONObject().put("mode", "conntrack"))
+                    .optJSONArray("result")
+                    ?.let(ToolParsers::parseConntrackStats)
+            }
+            if (gen != generation) return
+            _state.update {
+                it.copy(
+                    loading = false,
+                    loadFailed = false,
+                    rows = rowsResult?.second ?: it.rows,
+                    total = rowsResult?.first ?: it.total,
+                    udp = statsResult?.first,
+                    tcp = statsResult?.second,
+                    other = statsResult?.third,
+                )
+            }
+            refreshDns()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

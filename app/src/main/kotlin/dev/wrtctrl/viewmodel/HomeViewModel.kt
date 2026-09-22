@@ -22,6 +22,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -76,13 +78,14 @@ data class HomeUiState(
 )
 
 /**
- * 首页仪表盘轮询：每 3s 一次并发 8 项（board / info / conntrack×2 / iface dump /
- * getTempInfo / getMountPoints / getCPUUsage）+ 带宽差分（getRealtimeStats）。
+ * 首页仪表盘轮询：快拍（3s）= info / conntrack_count / iface dump / getCPUUsage +
+ * 带宽差分（getRealtimeStats），board 与 conntrack_max 为会话/重启内恒定值缓存后不再占快拍
+ * （缓存在切设备时失效）；慢拍（每 SLOW_EVERY 拍 ≈9s）= 无线客户端数 / DHCP 租约数 /
+ * 当前设备 ping + 温度 / 挂载点（秒级缓变量，不上 3s 快拍）。
  * 
- * 慢拍（每 SLOW_EVERY 拍一次，约 9s）：无线客户端数 / DHCP 租约数 / 当前设备 ping——
- * 变化低频且调用较重，不上 3s 快拍（UI 改版 P1 新增，均为既有桥接/策略）。
  * 轮询门控：pollingActive 默认关，由屏幕层 PollingGate 驱动（组合可见 × 前台）；
- * 循环先等一个周期再刷——进页/切设备的立即拉取（switchDevice/refresh 走 slow=true）不与之重复。
+ * 循环先等一个周期再刷——进页/切设备的立即拉取（switchDevice/refresh 走 slow=true）不与之重复；
+ * 一轮拉取互斥（pollMutex）：tick 与下拉刷新重叠时串行化，防瞬时双倍请求。
  * 带宽目标 = wan 优先（l3_device），无 wan 回落 br-lan（旧 getQuickBandwidthTarget）。
  * 解析逻辑全部在 HomeParsers（纯函数，JVM 单测覆盖）。
  */
@@ -97,6 +100,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 慢拍用设备档案缓存（切设备失效；避免每拍重读 DataStore） */
     private var cachedDevice: Device? = null
     private var slowTick = 0
+
+    /** system board 全量（会话内恒定，applyPoll 只消费型号/主机名/固件三字段）；切设备失效 */
+    private var boardCache: JSONObject? = null
+
+    /** nf_conntrack_max（重启才变）；切设备失效 */
+    private var connMaxCache: String? = null
+
+    /** 一轮拉取互斥：tick 与下拉刷新/切设备补拉重叠时串行化（防瞬时 18 路请求） */
+    private val pollMutex = Mutex()
 
     /** 设备代次（reqSeq 守卫）：切设备 +1，在飞响应按代次丢弃，防旧设备数据覆盖新设备首拉 */
     private var generation = 0
@@ -150,6 +162,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         if (deviceId == loadedDeviceId) return
         loadedDeviceId = deviceId
         cachedDevice = null
+        boardCache = null
+        connMaxCache = null
         generation++
         bandwidthDevice = null
         _state.update {
@@ -191,28 +205,40 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun pollOnce(slow: Boolean = false) {
-        val gen = generation
-        val poll = coroutineScope {
-            val board = async { ubusSafe("system", "board") }
-            val info = async { ubusSafe("system", "info") }
-            val connCount = async { readSafe("/proc/sys/net/netfilter/nf_conntrack_count") }
-            val connMax = async { readSafe("/proc/sys/net/netfilter/nf_conntrack_max") }
-            val ifaceDump = async { ubusSafe("network.interface", "dump") }
-            val temp = async { ubusSafe("luci", "getTempInfo") }
-            val mounts = async { ubusSafe("luci", "getMountPoints") }
-            val cpu = async { ubusSafe("luci", "getCPUUsage") }
-            HomePoll(
-                board.await(), info.await(), connCount.await(), connMax.await(),
-                ifaceDump.await(), temp.await(), mounts.await(), cpu.await(),
-            )
-        }
-        // 拉取期间设备已切换：整轮丢弃（失败项保留旧值语义不变）
-        if (gen != generation) return
-        _state.update { applyPoll(it, poll) }
+        pollMutex.withLock {
+            val gen = generation
+            val poll = coroutineScope {
+                // 恒定数据缓存命中则不发起（board/conntrack_max，P0-2）
+                val boardJob = if (boardCache == null) async { ubusSafe("system", "board") } else null
+                val infoJob = async { ubusSafe("system", "info") }
+                val connCountJob = async { readSafe("/proc/sys/net/netfilter/nf_conntrack_count") }
+                val connMaxJob = if (connMaxCache == null) async { readSafe("/proc/sys/net/netfilter/nf_conntrack_max") } else null
+                val ifaceJob = async { ubusSafe("network.interface", "dump") }
+                // 温度/挂载点秒级缓变：只在慢拍拉，快拍轮保留旧值
+                val tempJob = if (slow) async { ubusSafe("luci", "getTempInfo") } else null
+                val mountsJob = if (slow) async { ubusSafe("luci", "getMountPoints") } else null
+                val cpuJob = async { ubusSafe("luci", "getCPUUsage") }
+                HomePoll(
+                    board = boardJob?.await() ?: boardCache,
+                    info = infoJob.await(),
+                    connCount = connCountJob.await(),
+                    connMax = connMaxJob?.await() ?: connMaxCache,
+                    ifaceDump = ifaceJob.await(),
+                    temp = tempJob?.await(),
+                    mounts = mountsJob?.await(),
+                    cpu = cpuJob.await(),
+                )
+            }
+            // 拉取期间设备已切换：整轮丢弃（失败项保留旧值语义不变），恒定缓存也不落
+            if (gen != generation) return
+            poll.board?.let { boardCache = it }
+            poll.connMax?.let { connMaxCache = it }
+            _state.update { applyPoll(it, poll) }
 
-        // 带宽依赖 iface dump 的目标设备
-        poll.ifaceDump?.let { fetchBandwidth(it, gen) }
-        if (slow) fetchSlow(gen)
+            // 带宽依赖 iface dump 的目标设备
+            poll.ifaceDump?.let { fetchBandwidth(it, gen) }
+            if (slow) fetchSlow(gen)
+        }
     }
 
     /** 一轮拉取结果 → 状态字段映射：各字段失败/缺失时保留旧值（静默保留） */
@@ -277,10 +303,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val samples = payload.optJSONArray("result") ?: return
-        // 差分解析单独包护：畸形样本行（非数组元素）抛 JSONException 不得外溢——
-        // 外层轮询循环虽有兜底，但那会让本轮 board/info 等已到手的更新一起作废
+        // 差分解析单独包护：畸形样本行（非数组元素）不得外溢——外层轮询循环虽有兜底，
+        // 但那会让本轮 info 等已到手的更新一起作废；解析在 IO
         val series = try {
-            bandwidthRates(samples)
+            withContext(Dispatchers.IO) { bandwidthRates(samples) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

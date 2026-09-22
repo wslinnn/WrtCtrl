@@ -9,6 +9,9 @@ import dev.wrtctrl.bridge.WrtCore
 import dev.wrtctrl.util.OuiDb
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -66,6 +69,12 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
     private var staticHostsCache: List<StaticHost>? = null
     private var blockedCache: Map<String, String>? = null
 
+    /** 静态/拉黑表失败退避：确定性失败（固件缺 config/ACL 拒绝）下每 tick 重试
+     *  大 payload 是纯浪费——失败后连续 N 拍跳过重试；写路径与下拉刷新重置（用户动作
+     *  与写前回读不受退避影响） */
+    private var staticBackoff = 0
+    private var blockedBackoff = 0
+
     /** 设备代次（reqSeq 守卫）：切设备 +1，在飞响应按代次丢弃 */
     private var generation = 0
 
@@ -98,6 +107,8 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
             dhcpCache = null
             staticHostsCache = null
             blockedCache = null
+            staticBackoff = 0
+            blockedBackoff = 0
             _state.update { ClientUiState() }
             loadWireless()
         }
@@ -116,17 +127,34 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
         }
         // 无线失败不连坐租约/静态表：radios 拉不到只置无线失败标志，租约照常拉取落地——
         // 否则无 wifi 固件上租约首拉要等第一个轮询 tick，「暂无租约」先行数秒（实测反馈）
-        val radios = ubusSafe("luci-rpc", "getWirelessDevices")
-        val dhcp = ensureDhcp(gen)
-        val statics = ensureStatic(gen)
-        val blocked = ensureBlocked(gen)
+        // 四源互不依赖：并行发出收敛 tick 活跃窗口
+        var radios: JSONObject? = null
+        var dhcp: Pair<List<DhcpLease>, List<DhcpLease>>? = null
+        var statics: List<StaticHost>? = null
+        var blocked: Map<String, String>? = null
+        coroutineScope {
+            val radiosJob = async { ubusSafe("luci-rpc", "getWirelessDevices") }
+            val dhcpJob = async { ensureDhcp(gen) }
+            val staticJob = async { ensureStatic(gen) }
+            val blockedJob = async { ensureBlocked(gen) }
+            radios = radiosJob.await()
+            dhcp = dhcpJob.await()
+            statics = staticJob.await()
+            blocked = blockedJob.await()
+        }
         // 失败时 hostname/IP 合并退化为无合并（无线列表本身仍可展示）
         val hostnames = dhcp?.let { (v4, v6) -> ClientParsers.hostnameMap(v4, v6) } ?: emptyMap()
         val ips = dhcp?.let { (v4, _) -> ClientParsers.ipMap(v4) } ?: emptyMap()
         val clients = mutableListOf<WifiClient>()
         radios?.let {
-            ClientParsers.wifiIfaces(it).forEach { (ifname, band) ->
-                clients += ClientParsers.clientsOf(ifname, band, assocSafe(ifname), hostnames, ips)
+            val ifaces = ClientParsers.wifiIfaces(it)
+            // 逐接口 assoclist 并行预取，列表按 radio 原序组装
+            val assoc = coroutineScope {
+                ifaces.map { (ifname, _) -> async { ifname to assocSafe(ifname) } }
+                    .awaitAll().toMap()
+            }
+            ifaces.forEach { (ifname, band) ->
+                clients += ClientParsers.clientsOf(ifname, band, assoc[ifname] ?: JSONArray(), hostnames, ips)
             }
         }
         if (gen != generation) return
@@ -158,6 +186,8 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
             val startedAt = SystemClock.elapsedRealtime()
             dhcpCache = null
             staticHostsCache = null
+            staticBackoff = 0
+            blockedBackoff = 0
             loadWirelessNow(showLoading = false)
             holdRefreshSpin(startedAt)
             _state.update { it.copy(refreshing = false) }
@@ -196,16 +226,21 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
         return pair
     }
 
-    /** 静态租约表（WrtCore.uciGet 专用通道；拉一次缓存；失败返回 null 不缓存——
-     *  下次轮询重试，不误标全部动态） */
-    private suspend fun ensureStatic(gen: Int): List<StaticHost>? {
+    /** 静态租约表（WrtCore.uciGet 专用通道；拉一次缓存；失败返回 null 不缓存并进入退避——
+     *  polling 路径 N 拍内不再重试，写前回读（respectBackoff=false）不受退避限制） */
+    private suspend fun ensureStatic(gen: Int, respectBackoff: Boolean = true): List<StaticHost>? {
         staticHostsCache?.let { return it }
+        if (respectBackoff && staticBackoff > 0) {
+            staticBackoff--
+            return null
+        }
         val uciDhcp = try {
             WrtCore.uciGet("dhcp")
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             android.util.Log.w("wrtctrl", "static dhcp hosts load failed: ${e.message}")
+            staticBackoff = LOAD_BACKOFF_TICKS
             return null
         }
         val hosts = try {
@@ -214,22 +249,31 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
             throw e
         } catch (e: Exception) {
             android.util.Log.w("wrtctrl", "static dhcp hosts parse failed: ${e.message}")
+            staticBackoff = LOAD_BACKOFF_TICKS
             return null
         }
-        if (gen == generation) staticHostsCache = hosts
+        if (gen == generation) {
+            staticHostsCache = hosts
+            staticBackoff = 0
+        }
         return hosts
     }
 
-    /** 拉黑规则集合（WrtCore.uciGet("firewall") 专用通道；拉一次缓存；失败返回 null 不缓存——
-     *  下次轮询重试，静默；写操作成功后主动失效缓存，下一拍对账设备端真实规则） */
-    private suspend fun ensureBlocked(gen: Int): Map<String, String>? {
+    /** 拉黑规则集合（WrtCore.uciGet("firewall") 专用通道；拉一次缓存；失败返回 null 不缓存并进入
+     *  退避，下次轮询按拍间隔重试；写操作成功后主动失效缓存，下一拍对账设备端真实规则） */
+    private suspend fun ensureBlocked(gen: Int, respectBackoff: Boolean = true): Map<String, String>? {
         blockedCache?.let { return it }
+        if (respectBackoff && blockedBackoff > 0) {
+            blockedBackoff--
+            return null
+        }
         val uciFirewall = try {
             WrtCore.uciGet("firewall")
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             android.util.Log.w("wrtctrl", "firewall config load failed: ${e.message}")
+            blockedBackoff = LOAD_BACKOFF_TICKS
             return null
         }
         val macs = try {
@@ -238,9 +282,13 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
             throw e
         } catch (e: Exception) {
             android.util.Log.w("wrtctrl", "firewall config parse failed: ${e.message}")
+            blockedBackoff = LOAD_BACKOFF_TICKS
             return null
         }
-        if (gen == generation) blockedCache = macs
+        if (gen == generation) {
+            blockedCache = macs
+            blockedBackoff = 0
+        }
         return macs
     }
 
@@ -251,11 +299,14 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** 写失败收尾：双缓存失效（下拍对账设备端真实状态）+ busy 清除 + 分类文案（原始链已进 logcat） */
+    /** 写失败收尾：双缓存失效（下拍对账设备端真实状态）+ 退避重置（用户动作后立即重试）
+     *  + busy 清除 + 分类文案（原始链已进 logcat） */
     private fun writeFailed(gen: Int, e: Exception, textRes: Int) {
         android.util.Log.w("wrtctrl", "write failed: ${e.message}")
         staticHostsCache = null
         blockedCache = null
+        staticBackoff = 0
+        blockedBackoff = 0
         _state.update {
             it.copy(
                 busyMac = null,
@@ -284,8 +335,10 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
                 if (block) {
                     // 写前强一致回读：本地集合为空可能是「拉取失败」而非「真无规则」——
                     // 此时盲加会造出重复 block_ 规则（重复规则在折叠 map 里只显一条，
-                    // 另一条 app 永远删不掉）
-                    val known = _state.value.blockedMacs.ifEmpty { ensureBlocked(gen) ?: emptyMap() }
+                    // 另一条 app 永远删不掉）；回读不受轮询退避限制
+                    val known = _state.value.blockedMacs.ifEmpty {
+                        ensureBlocked(gen, respectBackoff = false) ?: emptyMap()
+                    }
                     if (mac in known) {
                         if (gen == generation) {
                             _state.update { it.copy(blockedMacs = known, busyMac = null) }
@@ -309,6 +362,7 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
                     )
                     WrtCore.uciCommit("firewall")
                     blockedCache = null
+                    blockedBackoff = 0
                     finishWrite(gen) { it.copy(blockedMacs = it.blockedMacs + (mac to section)) }
                 } else {
                     // 集合里没有（如读取失败期间点解除）：不盲删，回读设备端定位后再删
@@ -326,6 +380,7 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
                     WrtCore.uciDelete("firewall", section)
                     WrtCore.uciCommit("firewall")
                     blockedCache = null
+                    blockedBackoff = 0
                     finishWrite(gen) { it.copy(blockedMacs = it.blockedMacs - mac) }
                 }
             } catch (e: CancellationException) {
@@ -350,8 +405,10 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
         _state.update { it.copy(busyMac = mac.lowercase()) }
         try {
             // 写前强一致回读（同 toggleBlock）：静态表拉取失败时空列表不等于「未绑定」，
-            // 盲加会造出同 MAC 的重复 @host
-            val known = _state.value.staticHosts.ifEmpty { ensureStatic(gen) ?: emptyList() }
+            // 盲加会造出同 MAC 的重复 @host；回读不受轮询退避限制
+            val known = _state.value.staticHosts.ifEmpty {
+                ensureStatic(gen, respectBackoff = false) ?: emptyList()
+            }
             if (known.any { it.mac == mac }) {
                 if (gen == generation) {
                     _state.update { it.copy(staticHosts = known, busyMac = null) }
@@ -372,6 +429,7 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
                 )
                 WrtCore.uciCommit("dhcp")
                 staticHostsCache = null
+                staticBackoff = 0
                 // 乐观更新按 section 幂等 upsert（历史崩溃修复）：uciAdd 返回后
                 // 新 section 即已存在于设备 staging，写窗口内轮询若真拉设备会把含新 section
                 // 的列表先落进 state——盲追加会产生重复 key（LazyColumn 崩溃）；先剔后加保证
@@ -413,6 +471,7 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
                 WrtCore.uciDelete("dhcp", section)
                 WrtCore.uciCommit("dhcp")
                 staticHostsCache = null
+                staticBackoff = 0
                 finishWrite(gen) { it.copy(staticHosts = it.staticHosts.filter { host -> host.mac != mac }) }
             } catch (e: CancellationException) {
                 throw e
@@ -472,5 +531,8 @@ class ClientViewModel(application: Application) : AndroidViewModel(application) 
     private companion object {
         /** 轮询周期：与首页一致（可见时静默刷新） */
         const val POLL_INTERVAL = 3000L
+
+        /** 静态/拉黑表失败退避拍数：失败后 5 拍（≈15s）内不再重试大 payload */
+        const val LOAD_BACKOFF_TICKS = 5
     }
 }
